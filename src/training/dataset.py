@@ -17,6 +17,9 @@ class AudioDataset(torch.utils.data.Dataset):
         if len(self.files) == 0:
             raise ValueError(f"No valid files found in {self.data_dir}")
         
+        # Calculate dataset statistics
+        self.calculate_stats()
+        
         # Pre-calculate number of windows for each file
         self.file_windows = []
         for file_path in self.files:
@@ -26,6 +29,53 @@ class AudioDataset(torch.utils.data.Dataset):
             self.file_windows.append(num_windows)
             
         self.cumulative_windows = np.cumsum([0] + self.file_windows)
+    
+    def calculate_stats(self):
+        """Calculate dataset statistics for normalization"""
+        print("Calculating dataset statistics...")
+        specs = []
+        for file_path in self.files:
+            data = torch.load(file_path)
+            spec = data['spectrogram']
+            
+            # Debug prints
+            print(f"Raw spec range: [{spec.min():.4f}, {spec.max():.4f}]")
+            
+            # Ensure positive values before log
+            spec = spec.clamp(min=1e-5)
+            spec = torch.log(spec)
+            
+            print(f"Log spec range: [{spec.min():.4f}, {spec.max():.4f}]")
+            specs.append(spec)
+        
+        # Concatenate all specs
+        specs = torch.cat(specs, dim=2)
+        self.spec_mean = specs.mean()
+        self.spec_std = specs.std()
+        print(f"Dataset stats - Mean: {self.spec_mean:.4f}, Std: {self.spec_std:.4f}")
+    
+    def normalize_spectrogram(self, spec):
+        """Normalize spectrogram"""
+        # Ensure positive values
+        spec = spec.clamp(min=1e-5)
+        
+        # Convert to log scale
+        spec = torch.log(spec)
+        
+        # Ensure finite values before normalization
+        if not torch.isfinite(spec).all():
+            print(f"Warning: Non-finite values in log spec: {spec[~torch.isfinite(spec)]}")
+            spec = torch.nan_to_num(spec, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Z-score normalization
+        spec = (spec - self.spec_mean) / (self.spec_std + 1e-5)
+        
+        # Final safety check
+        if not torch.isfinite(spec).all():
+            print("Warning: Non-finite values after normalization!")
+            spec = torch.nan_to_num(spec, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        return spec
     
     def get_file_list(self):
         # Get all spectrogram files (both .npy and .pt formats)
@@ -62,6 +112,9 @@ class AudioDataset(torch.utils.data.Dataset):
         if window.shape[2] < self.window_length:
             pad_size = self.window_length - window.shape[2]
             window = torch.nn.functional.pad(window, (0, pad_size))
+        
+        # Normalize the window
+        window = self.normalize_spectrogram(window)
         
         return {
             'spectrogram': window,
