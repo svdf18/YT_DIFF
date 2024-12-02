@@ -178,10 +178,13 @@ pyrightconfig.json
 *.pt
 *.mp3
 *.wav
+# Directories
+runs/
+checkpoints/
 
 # Directories
-logs
-data
-audio_files
+logs/
+data/
+audio_files/
 
 # End of https://www.toptal.com/developers/gitignore/api/python
