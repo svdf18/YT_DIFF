@@ -18,17 +18,17 @@ class SpectrogramFormat:
         Initialize the spectrogram converter with given configuration.
         
         Args:
-            config (dict): Configuration containing:
+            config (AudioConfig): Configuration containing:
                 - sample_rate: Audio sample rate (default: 44100 Hz)
                 - n_fft: Size of FFT window (default: 2048 samples)
                 - n_mels: Number of mel bands (default: 80 bands)
                 - hop_length: Number of samples between FFT windows (default: 512 samples)
         """
         # Extract configuration parameters with defaults
-        self.sample_rate = config.get('sample_rate', 44100)
-        self.n_fft = config.get('n_fft', 2048)
-        self.n_mels = config.get('n_mels', 80)
-        self.hop_length = config.get('hop_length', 512)
+        self.sample_rate = config.sample_rate
+        self.n_fft = config.n_fft
+        self.n_mels = config.n_mels
+        self.hop_length = config.hop_length
         
         # Initialize mel spectrogram converter
         # This transforms audio waveforms to mel spectrograms

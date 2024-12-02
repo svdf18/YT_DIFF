@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .base_model import BaseModel
-from src.configs.model_config import ModelConfig
+from src.configs.model_config import VAEConfig
+from src.configs.base_config import TrainingConfig
 
 class ConvBlock(nn.Module):
     """
@@ -36,14 +37,14 @@ class AudioVAE(BaseModel):
         # Use default config if none provided
         if config is None:
             self.logger.info("Using default VAE configuration")
-            config = ModelConfig.VAE_CONFIG
+            config = VAEConfig()
         
         # Extract config parameters
-        self.latent_dim = config['latent_dim']
-        self.hidden_dims = config['hidden_dims']
-        self.in_channels = config['in_channels']
-        self.n_mels = config['n_mels']
-        self.kld_weight = config['kld_weight']
+        self.latent_dim = config.latent_dim
+        self.hidden_dims = config.hidden_dims
+        self.in_channels = config.in_channels
+        self.n_mels = config.n_mels
+        self.kld_weight = config.kld_weight
         
         self.logger.info(f"Initializing AudioVAE with latent dim: {self.latent_dim}")
         
