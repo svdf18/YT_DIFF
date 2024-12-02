@@ -38,9 +38,13 @@ class Trainer:
             self.model.train()
             train_loss = self._train_epoch(train_loader, epoch)
             
+            # Log training metrics
+            self.writer.add_scalar('train/epoch_loss', train_loss, epoch)
+            
             # Validation phase
             if val_loader:
                 val_loss = self._validate(val_loader, epoch)
+                self.writer.add_scalar('val/epoch_loss', val_loss, epoch)
                 
                 # Model checkpointing
                 if val_loss < self.best_loss:
@@ -49,10 +53,17 @@ class Trainer:
             
     def _train_epoch(self, dataloader, epoch):
         total_loss = 0
-        pbar = tqdm(dataloader, desc=f'Epoch {epoch}')
+        total_recon_loss = 0
+        total_kld_loss = 0
         
-        for batch_idx, data in enumerate(pbar):
-            data = data.to(self.device)
+        pbar = tqdm(dataloader, desc=f'Epoch {epoch}')
+        for batch_idx, batch in enumerate(pbar):
+            # Extract spectrogram from batch dictionary
+            data = batch['spectrogram'].to(self.device)
+            file_indices = batch['file_idx']
+            window_indices = batch['window_idx']
+            metadata = batch['metadata']
+            
             self.optimizer.zero_grad()
             
             # Forward pass
@@ -67,30 +78,58 @@ class Trainer:
             
             # Logging
             total_loss += loss.item()
-            self.writer.add_scalar('train/batch_loss', loss.item(), 
-                                 epoch * len(dataloader) + batch_idx)
+            total_recon_loss += recon_loss.item()
+            total_kld_loss += kld_loss.item()
             
-            pbar.set_postfix({'loss': loss.item()})
+            # Log batch metrics
+            batch_global_idx = epoch * len(dataloader) + batch_idx
+            self.writer.add_scalar('train/batch_loss', loss.item(), batch_global_idx)
+            self.writer.add_scalar('train/batch_recon_loss', recon_loss.item(), batch_global_idx)
+            self.writer.add_scalar('train/batch_kld_loss', kld_loss.item(), batch_global_idx)
+            
+            # Update progress bar
+            pbar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'recon_loss': f'{recon_loss.item():.4f}',
+                'kld_loss': f'{kld_loss.item():.4f}'
+            })
             
         avg_loss = total_loss / len(dataloader)
-        self.writer.add_scalar('train/epoch_loss', avg_loss, epoch)
+        avg_recon_loss = total_recon_loss / len(dataloader)
+        avg_kld_loss = total_kld_loss / len(dataloader)
+        
         return avg_loss
     
     def _validate(self, dataloader, epoch):
         self.model.eval()
         total_loss = 0
+        total_recon_loss = 0
+        total_kld_loss = 0
         
         with torch.no_grad():
-            for data in dataloader:
-                data = data.to(self.device)
+            for batch in dataloader:
+                # Extract spectrogram from batch dictionary
+                data = batch['spectrogram'].to(self.device)
+                
+                # Forward pass
                 recon_batch, original, mu, log_var = self.model(data)
-                loss, _, _ = self.model.loss_function(
+                loss, recon_loss, kld_loss = self.model.loss_function(
                     recon_batch, original, mu, log_var
                 )
+                
                 total_loss += loss.item()
+                total_recon_loss += recon_loss.item()
+                total_kld_loss += kld_loss.item()
         
         avg_loss = total_loss / len(dataloader)
+        avg_recon_loss = total_recon_loss / len(dataloader)
+        avg_kld_loss = total_kld_loss / len(dataloader)
+        
+        # Log validation metrics
         self.writer.add_scalar('val/epoch_loss', avg_loss, epoch)
+        self.writer.add_scalar('val/epoch_recon_loss', avg_recon_loss, epoch)
+        self.writer.add_scalar('val/epoch_kld_loss', avg_kld_loss, epoch)
+        
         return avg_loss
     
     def save_checkpoint(self, epoch, loss):
@@ -99,6 +138,11 @@ class Trainer:
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'loss': loss,
+            'config': self.config,  # Save config for model reconstruction
+            'window_params': {      # Save windowing parameters
+                'window_length': self.config.window_length if hasattr(self.config, 'window_length') else 80,
+                'hop_length': self.config.hop_length if hasattr(self.config, 'hop_length') else 40,
+            }
         }
         path = f'checkpoints/vae_epoch_{epoch}_loss_{loss:.4f}.pt'
         os.makedirs('checkpoints', exist_ok=True)
