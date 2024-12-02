@@ -11,7 +11,8 @@ class BaseModel(nn.Module):
         
     def get_device(self):
         """Get the device the model is on"""
-        return next(self.parameters()).device
+        device = next(self.parameters()).device
+        return torch.device(device.type)
     
     def count_parameters(self):
         """Count number of trainable parameters"""

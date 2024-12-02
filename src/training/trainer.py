@@ -60,14 +60,12 @@ class Trainer:
         for batch_idx, batch in enumerate(pbar):
             # Extract spectrogram from batch dictionary
             data = batch['spectrogram'].to(self.device)
-            file_indices = batch['file_idx']
-            window_indices = batch['window_idx']
-            metadata = batch['metadata']
             
             self.optimizer.zero_grad()
             
             # Forward pass
             recon_batch, original, mu, log_var = self.model(data)
+            
             loss, recon_loss, kld_loss = self.model.loss_function(
                 recon_batch, original, mu, log_var
             )

@@ -115,10 +115,11 @@ class AudioVAE(BaseModel):
     
     def _get_flat_dim(self):
         """Calculate the flattened dimension after encoder convolutions."""
+        # Use a sample input with time dimension = n_mels for initialization
         x = torch.randn(1, self.in_channels, self.n_mels, self.n_mels)
         with torch.no_grad():
             x = self.encoder(x)
-            self.encoder_spatial_dims = (x.size(2), x.size(3))  # Store for decoder
+            self.encoder_spatial_dims = (x.size(2), x.size(3))
         return x.flatten(1).shape[1]
     
     def encode(self, x):
@@ -181,9 +182,21 @@ class AudioVAE(BaseModel):
         Returns:
             tuple: (reconstruction, input, mu, log_var)
         """
+        # Pad input to square if necessary for processing
+        orig_time_dim = x.size(3)
+        if x.size(2) != x.size(3):
+            target_size = max(x.size(2), x.size(3))
+            x = F.pad(x, (0, target_size - x.size(3), 0, target_size - x.size(2)))
+        
         mu, log_var = self.encode(x)
         z = self.reparameterize(mu, log_var)
         reconstruction = self.decode(z)
+        
+        # Crop back to original time dimension
+        if reconstruction.size(3) != orig_time_dim:
+            reconstruction = reconstruction[:, :, :, :orig_time_dim]
+            x = x[:, :, :, :orig_time_dim]
+        
         return reconstruction, x, mu, log_var
     
     def loss_function(self, recons, x, mu, log_var, kld_weight=None):

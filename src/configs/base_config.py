@@ -25,3 +25,7 @@ class TrainingConfig:
     in_channels: int = 1
     n_mels: int = 80
     kld_weight: float = 0.00025
+    
+    # Window parameters
+    window_length: int = 80
+    hop_length: int = 40

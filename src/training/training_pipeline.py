@@ -34,8 +34,11 @@ def train(config: TrainingConfig):
             for batch in pbar:
                 optimizer.zero_grad()
                 
+                # Extract spectrogram from batch dictionary
+                data = batch['spectrogram'].to(model.get_device())
+                
                 # Forward pass
-                recon, orig, mu, logvar = model(batch)
+                recon, orig, mu, logvar = model(data)
                 loss, recon_loss, kld = model.loss_function(recon, orig, mu, logvar)
                 
                 # Backward pass
