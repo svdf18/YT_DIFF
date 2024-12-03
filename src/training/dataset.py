@@ -1,9 +1,13 @@
+import warnings
 import torch
 import torchaudio
 import glob
 import os
 import numpy as np
 from pathlib import Path
+
+# Ignore FutureWarnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # 3. Create dataset loader (src/training/dataset.py)
 class AudioDataset(torch.utils.data.Dataset):

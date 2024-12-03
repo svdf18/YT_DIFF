@@ -7,11 +7,11 @@ from tqdm import tqdm
 class Trainer:
     def __init__(self, model, config):
         self.model = model
-        self.config = config
+        self.config = config.training
         self.device = model.get_device()
         self.optimizer = torch.optim.Adam(
             model.parameters(), 
-            lr=config.learning_rate
+            lr=self.config.learning_rate
         )
         self.writer = SummaryWriter(log_dir='runs/vae_training')
         self.best_loss = float('inf')

@@ -4,19 +4,26 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 from src.models.vae import AudioVAE
+from src.models.unet_edm import UNetEDM
 from src.training.dataset import AudioDataset
-from src.configs.base_config import TrainingConfig
+from src.configs.model_config import Config, VAEOnlyConfig, EDM2OnlyConfig
 
-def train(config: TrainingConfig):
+def train(config: Config):
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     
     # Initialize model
-    model = AudioVAE(config)
+    if isinstance(config, VAEOnlyConfig):
+        model = AudioVAE(config)
+    elif isinstance(config, EDM2OnlyConfig):
+        model = UNetEDM(config)
+    else:
+        raise ValueError("Unsupported model type")
+    
     optimizer = torch.optim.Adam(
         model.parameters(), 
-        lr=config.learning_rate, 
+        lr=config.training.learning_rate, 
         betas=(0.9, 0.99), 
         eps=1e-8
     )
@@ -24,16 +31,16 @@ def train(config: TrainingConfig):
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, 
-        lr_lambda=lambda step: min((step + 1) / config.lr_warmup_steps, 1.0) ** config.lr_decay_exponent
+        lr_lambda=lambda step: min((step + 1) / config.training.lr_warmup_steps, 1.0) ** config.training.lr_decay_exponent
     )
     
     # Setup data
-    dataset = AudioDataset(data_dir=config.data_dir, config=config)
+    dataset = AudioDataset(data_dir=config.training.data_dir, config=config)
     dataloader = DataLoader(
         dataset, 
-        batch_size=config.batch_size,
+        batch_size=config.training.batch_size,
         shuffle=True,
-        num_workers=8,  # Increase number of workers
+        num_workers=8,
         pin_memory=True
     )
     
@@ -41,7 +48,7 @@ def train(config: TrainingConfig):
     max_grad_norm = 10.0
     
     # Training loop
-    for epoch in range(config.num_epochs):
+    for epoch in range(config.training.num_epochs):
         model.train()
         total_loss = 0
         optimizer.zero_grad()
@@ -51,15 +58,22 @@ def train(config: TrainingConfig):
                 # Extract spectrogram from batch dictionary
                 data = batch['spectrogram'].to(model.get_device())
                 
-                # Forward pass
-                recon, orig, mu, logvar = model(data)
-                loss, recon_loss, kld = model.loss_function(recon, orig, mu, logvar)
+                # Forward pass (different for VAE and EDM2)
+                if isinstance(model, AudioVAE):
+                    recon, x, mu, log_var = model(data)
+                    loss, recons_loss, kld_loss = model.loss_function(recon, x, mu, log_var)
+                elif isinstance(model, UNetEDM):
+                    # Generate time embeddings for EDM2
+                    time = torch.linspace(0, 1, steps=data.size(0)).to(model.get_device())
+                    recon = model(data, time)
+                    # Simple reconstruction loss for now
+                    loss = torch.nn.functional.mse_loss(recon, data)
                 
                 # Backward pass
                 loss.backward()
                 
                 # Gradient accumulation
-                if (i + 1) % config.gradient_accumulation_steps == 0:
+                if (i + 1) % config.training.gradient_accumulation_steps == 0:
                     # Add gradient clipping
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                     optimizer.step()
@@ -67,20 +81,20 @@ def train(config: TrainingConfig):
                 
                 # Update progress bar
                 total_loss += loss.item()
-                pbar.set_postfix({'loss': loss.item()})
+                if isinstance(model, AudioVAE):
+                    pbar.set_postfix({'loss': loss.item(), 'recon': recons_loss.item(), 'kld': kld_loss.item()})
+                else:
+                    pbar.set_postfix({'loss': loss.item()})
                 
                 # Update learning rate
                 scheduler.step()
-
-                print(f"Input range: [{data.min():.2f}, {data.max():.2f}]")
-                print(f"Reconstruction range: [{recon.min():.2f}, {recon.max():.2f}]")
         
         # Log epoch results
         avg_loss = total_loss / len(dataloader)
-        logger.info(f"Epoch {epoch+1} - Avg Loss: {avg_loss:.4f}, Recon: {recon_loss:.4f}, KLD: {kld:.4f}")
+        logger.info(f"Epoch {epoch+1} - Avg Loss: {avg_loss:.4f}")
         
         # Save checkpoint
-        if (epoch + 1) % config.save_interval == 0:
+        if (epoch + 1) % config.training.save_interval == 0:
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -90,5 +104,5 @@ def train(config: TrainingConfig):
             torch.save(checkpoint, f"checkpoints/model_epoch_{epoch+1}.pt")
 
 if __name__ == "__main__":
-    config = TrainingConfig()
+    config = Config()
     train(config)

@@ -1,7 +1,7 @@
 import pytest
 import torch
 from src.models.vae import AudioVAE, ConvBlock
-from src.configs.model_config import ModelConfig
+from src.configs.model_config import VAEOnlyConfig
 
 @pytest.fixture
 def device():
@@ -15,7 +15,7 @@ def device():
 @pytest.fixture
 def vae_config():
     """Get VAE configuration"""
-    return ModelConfig.VAE_CONFIG
+    return VAEOnlyConfig()
 
 @pytest.fixture
 def vae_model(device, vae_config):
@@ -27,10 +27,10 @@ def vae_model(device, vae_config):
 def sample_batch(device, vae_config):
     """Create a sample batch of spectrograms"""
     batch_size = 4
-    n_mels = vae_config['n_mels']
+    n_mels = vae_config.audio.n_mels
     return torch.randn(
         batch_size, 
-        vae_config['in_channels'], 
+        vae_config.vae.in_channels, 
         n_mels, 
         n_mels
     ).to(device)
@@ -49,8 +49,8 @@ def test_vae_initialization(vae_model, vae_config):
     """Test VAE initialization and architecture"""
     # Test basic initialization
     assert isinstance(vae_model, AudioVAE)
-    assert vae_model.latent_dim == vae_config['latent_dim']
-    assert vae_model.in_channels == vae_config['in_channels']
+    assert vae_model.latent_dim == vae_config.vae.latent_dim
+    assert vae_model.in_channels == vae_config.vae.in_channels
     
     # Test encoder architecture
     assert isinstance(vae_model.encoder, torch.nn.Sequential)

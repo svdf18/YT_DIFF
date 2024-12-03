@@ -3,8 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .base_model import BaseModel
-from src.configs.model_config import VAEConfig
-from src.configs.base_config import TrainingConfig
+from src.configs.model_config import VAEOnlyConfig, Config
 
 class ConvBlock(nn.Module):
     """
@@ -31,20 +30,19 @@ class AudioVAE(BaseModel):
     - Latent: Samples from the distribution using reparameterization trick
     - Decoder: Reconstructs spectrogram from latent vector
     """
-    def __init__(self, config=None):
+    def __init__(self, config: Config):
         super().__init__()
-
-        # Use default config if none provided
-        if config is None:
-            self.logger.info("Using default VAE configuration")
-            config = VAEConfig()
+        
+        # Validate config
+        if not config.vae.enabled:
+            raise ValueError("VAE must be enabled in configuration")
         
         # Extract config parameters
-        self.latent_dim = config.latent_dim
-        self.hidden_dims = config.hidden_dims
-        self.in_channels = config.in_channels
-        self.n_mels = config.n_mels
-        self.kld_weight = config.kld_weight
+        self.latent_dim = config.vae.latent_dim
+        self.hidden_dims = config.vae.hidden_dims
+        self.in_channels = config.vae.in_channels
+        self.n_mels = config.audio.n_mels
+        self.kld_weight = config.vae.kld_weight
         
         self.logger.info(f"Initializing AudioVAE with latent dim: {self.latent_dim}")
         
