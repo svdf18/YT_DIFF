@@ -25,10 +25,12 @@ def inspect_processed_file(file_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, required=True)
+    parser.add_argument('--split', type=str, required=True, choices=['training', 'validation'],
+                       help='Which data split to inspect (training or validation)')
     parser.add_argument('--num_files', type=int, default=5, help='Number of files to inspect')
     args = parser.parse_args()
     
-    data_dir = Path(args.data_dir)
+    data_dir = Path(args.data_dir) / args.split / 'processed'
     
     # Find all processed files
     processed_files = []

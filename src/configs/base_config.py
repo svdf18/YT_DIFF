@@ -16,7 +16,7 @@ class VAEConfig:
     latent_dim: int = 128
     hidden_dims: list = field(default_factory=lambda: [32, 64, 128, 256])
     in_channels: int = 1
-    kld_weight: float = 0.000001
+    kld_weight: float = 0.01
 
 @dataclass
 class EDM2Config:
@@ -51,20 +51,29 @@ class EDM2Config:
 @dataclass
 class TrainingConfig:
     # Data
-    data_dir: str = "src/tests/test_data/processed"
+    train_dir: str = "data/training/processed"
+    val_dir: str = "data/validation/processed"
     
     # Training
-    batch_size: int = 32
-    learning_rate: float = 1e-3
+    batch_size: int = 64
+    learning_rate: float = 1e-4
     num_epochs: int = 100
     save_interval: int = 10
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 8
     lr_warmup_steps: int = 5000
     lr_decay_exponent: float = 1.0
     
     # Window parameters
     window_length: int = 80
     hop_length: int = 40
+    
+    # Validation
+    early_stopping_patience: int = 50
+    validation_interval: int = 5
+    
+    # Visualization
+    vis_interval: int = 5  # Visualize every N epochs
+    vis_samples: int = 4   # Number of samples to visualize
 
 @dataclass
 class Config:

@@ -1,6 +1,7 @@
 import argparse
 from src.training.training_pipeline import train
 from src.configs.model_config import create_config
+from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser()
@@ -13,10 +14,21 @@ def main():
     
     # Create config with CLI arguments
     config = create_config(args.model_type)
-    config.training.data_dir = args.data_dir
+    
+    # Set data directories - Correct the path construction
+    config.training.train_dir = Path(args.data_dir) / "training" / "processed"
+    config.training.val_dir = Path(args.data_dir) / "validation" / "processed"
+    
+    # Update other training parameters
     config.training.batch_size = args.batch_size
     config.training.learning_rate = args.learning_rate
     config.training.num_epochs = args.num_epochs
+    
+    # Verify directories exist
+    if not config.training.train_dir.exists():
+        raise ValueError(f"Training directory not found: {config.training.train_dir}")
+    if not config.training.val_dir.exists():
+        raise ValueError(f"Validation directory not found: {config.training.val_dir}")
     
     train(config)
 

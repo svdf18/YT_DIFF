@@ -1,8 +1,9 @@
 import torch
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import os
 from tqdm import tqdm
+from src.validation.validation import TrainingValidator
+from src.validation.visualizer import AudioVisualizer
 
 class Trainer:
     def __init__(self, model, config):
@@ -13,7 +14,10 @@ class Trainer:
             model.parameters(), 
             lr=self.config.learning_rate
         )
-        self.writer = SummaryWriter(log_dir='runs/vae_training')
+        
+        # Replace TensorBoard with validator and visualizer
+        self.validator = TrainingValidator(save_dir='checkpoints')
+        self.visualizer = AudioVisualizer(save_dir='visualizations')
         self.best_loss = float('inf')
         
     def train(self, train_dataset, val_dataset=None):
@@ -38,18 +42,19 @@ class Trainer:
             self.model.train()
             train_loss = self._train_epoch(train_loader, epoch)
             
-            # Log training metrics
-            self.writer.add_scalar('train/epoch_loss', train_loss, epoch)
-            
             # Validation phase
             if val_loader:
                 val_loss = self._validate(val_loader, epoch)
-                self.writer.add_scalar('val/epoch_loss', val_loss, epoch)
                 
-                # Model checkpointing
-                if val_loss < self.best_loss:
-                    self.best_loss = val_loss
-                    self.save_checkpoint(epoch, val_loss)
+                # Update validator (handles saving best model)
+                if self.validator.update(train_loss, val_loss, self.model, epoch):
+                    print("Early stopping triggered!")
+                    break
+                
+                # Visualize samples periodically
+                if epoch % 5 == 0:  # Every 5 epochs
+                    sample_batch = next(iter(val_loader))
+                    self._visualize_batch(sample_batch, epoch)
             
     def _train_epoch(self, dataloader, epoch):
         total_loss = 0
@@ -58,7 +63,6 @@ class Trainer:
         
         pbar = tqdm(dataloader, desc=f'Epoch {epoch}')
         for batch_idx, batch in enumerate(pbar):
-            # Extract spectrogram from batch dictionary
             data = batch['spectrogram'].to(self.device)
             
             self.optimizer.zero_grad()
@@ -79,12 +83,6 @@ class Trainer:
             total_recon_loss += recon_loss.item()
             total_kld_loss += kld_loss.item()
             
-            # Log batch metrics
-            batch_global_idx = epoch * len(dataloader) + batch_idx
-            self.writer.add_scalar('train/batch_loss', loss.item(), batch_global_idx)
-            self.writer.add_scalar('train/batch_recon_loss', recon_loss.item(), batch_global_idx)
-            self.writer.add_scalar('train/batch_kld_loss', kld_loss.item(), batch_global_idx)
-            
             # Update progress bar
             pbar.set_postfix({
                 'loss': f'{loss.item():.4f}',
@@ -93,9 +91,6 @@ class Trainer:
             })
             
         avg_loss = total_loss / len(dataloader)
-        avg_recon_loss = total_recon_loss / len(dataloader)
-        avg_kld_loss = total_kld_loss / len(dataloader)
-        
         return avg_loss
     
     def _validate(self, dataloader, epoch):
@@ -106,7 +101,6 @@ class Trainer:
         
         with torch.no_grad():
             for batch in dataloader:
-                # Extract spectrogram from batch dictionary
                 data = batch['spectrogram'].to(self.device)
                 
                 # Forward pass
@@ -120,28 +114,23 @@ class Trainer:
                 total_kld_loss += kld_loss.item()
         
         avg_loss = total_loss / len(dataloader)
-        avg_recon_loss = total_recon_loss / len(dataloader)
-        avg_kld_loss = total_kld_loss / len(dataloader)
-        
-        # Log validation metrics
-        self.writer.add_scalar('val/epoch_loss', avg_loss, epoch)
-        self.writer.add_scalar('val/epoch_recon_loss', avg_recon_loss, epoch)
-        self.writer.add_scalar('val/epoch_kld_loss', avg_kld_loss, epoch)
-        
         return avg_loss
     
-    def save_checkpoint(self, epoch, loss):
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'loss': loss,
-            'config': self.config,  # Save config for model reconstruction
-            'window_params': {      # Save windowing parameters
-                'window_length': self.config.window_length if hasattr(self.config, 'window_length') else 80,
-                'hop_length': self.config.hop_length if hasattr(self.config, 'hop_length') else 40,
-            }
-        }
-        path = f'checkpoints/vae_epoch_{epoch}_loss_{loss:.4f}.pt'
-        os.makedirs('checkpoints', exist_ok=True)
-        torch.save(checkpoint, path)
+    def _visualize_batch(self, batch, epoch):
+        """Visualize a batch of data"""
+        print(f"\nVisualizing batch for epoch {epoch}")
+        self.model.eval()
+        with torch.no_grad():
+            data = batch['spectrogram'].to(self.device)
+            recon_batch, original, mu, log_var = self.model(data)
+            
+            print(f"Original shape: {original[0].shape}")
+            print(f"Reconstruction shape: {recon_batch[0].shape}")
+            
+            # Plot spectrograms
+            self.visualizer.plot_spectrogram_comparison(
+                original[0].cpu(), 
+                recon_batch[0].cpu(),
+                f"Epoch {epoch} Reconstruction"
+            )
+            print(f"Visualization saved to: {self.visualizer.save_dir}")

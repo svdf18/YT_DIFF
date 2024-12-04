@@ -13,9 +13,16 @@ class AudioPreprocessor:
         self.input_dir = Path(config.input_dir)
         self.output_dir = Path(config.output_dir)
         self.format = SpectrogramFormat(config)
+
+        # Validate directories
+        if not self.input_dir.exists():
+            raise ValueError(f"Input directory does not exist: {self.input_dir}")
         
         # Create output directory if it doesn't exist
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Processing audio files from: {self.input_dir}")
+        print(f"Saving spectrograms to: {self.output_dir}")
         
     def process_file(self, audio_path, window_length=80, hop_length=40):
         """Process a single audio file to spectrogram with sliding windows
@@ -91,14 +98,23 @@ class AudioPreprocessor:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_dir', type=str, required=True)
-    parser.add_argument('--output_dir', type=str, required=True)
+    parser.add_argument('--input_dir', type=str, required=False)
+    parser.add_argument('--output_dir', type=str, required=False)
+    parser.add_argument('--split', type=str, choices=['training', 'validation'], default=None)
     args = parser.parse_args()
 
     # Create config with the directories
     config = AudioConfig()
-    config.input_dir = args.input_dir
-    config.output_dir = args.output_dir
+    
+    # Update paths based on split
+    if args.split:
+        config.input_dir = f"data/{args.split}/raw"
+        config.output_dir = f"data/{args.split}/processed"
+    else:
+        if not args.input_dir or not args.output_dir:
+            parser.error("--input_dir and --output_dir are required when --split is not used")
+        config.input_dir = args.input_dir
+        config.output_dir = args.output_dir
 
     # Create preprocessor and process files
     preprocessor = AudioPreprocessor(config)
