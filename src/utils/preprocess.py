@@ -4,7 +4,7 @@ import torch
 import torchaudio
 from pathlib import Path
 from tqdm import tqdm
-from src.modules.spectogram import SpectrogramFormat
+from src.modules.formats.spectogram import SpectrogramFormat
 import argparse
 from src.configs.base_config import AudioConfig
 

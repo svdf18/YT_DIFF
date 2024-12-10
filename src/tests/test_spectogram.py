@@ -2,7 +2,7 @@ import torch
 import torchaudio
 import unittest
 import os
-from modules.spectogram import SpectrogramFormat
+from src.modules.formats.spectogram import SpectrogramFormat
 
 class TestSpectrogramFormat(unittest.TestCase):
     """

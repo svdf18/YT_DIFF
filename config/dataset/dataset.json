@@ -1,0 +1,27 @@
+{
+  "dataset_formats": [".wav", ".mp3", ".flac"],
+  "source_formats": [".wav", ".mp3", ".flac", ".ogg", ".m4a"],
+  "sample_rate": 32000,
+  "num_channels": 2,
+  "min_sample_rate": 32000,
+  "min_kbps": 0,
+  "min_sample_length": 1442048,
+  "max_sample_length": 4800000,
+  "min_num_class_samples": 0,
+
+  "dataset_processor_verbose": true,
+
+  "pre_encoded_latents_vae": "edm2_vae_test",
+  "pre_encoded_latents_device_batch_size": 1,
+  "pre_encoded_latents_num_time_offset_augmentations": 8,
+  "pre_encoded_latents_pitch_offset_augmentations": [],
+  "pre_encoded_latents_stereo_mirroring_augmentation": false,
+  "pre_encoded_latents_enable_quantization": false,
+
+  "clap_enable_fusion": false,
+  "clap_embedding_labels": {
+    "drums": ["snare", "kick", "beat"],
+    "bass": ["bass", "sub bass", "808"]
+  },
+  "clap_embedding_tags": []
+}
