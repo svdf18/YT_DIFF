@@ -25,28 +25,35 @@ class EDM2Config:
     model_type: Literal["edm2_unet"] = "edm2_unet"
     attention_type: Literal["sdp", "einsum"] = "sdp"
     use_torch_compile: bool = True
-    hidden_dims: list = field(default_factory=lambda: [32, 64, 128, 256])
+    hidden_dims: list = field(default_factory=lambda: [32, 64, 128, 256, 512])
+    
+    # ResNet specific (new)
+    resnet_groups: int = 8
+    resnet_time_scale: float = 1.0
+    use_pixel_norm: bool = True
+    mlp_dim_mult: int = 2
+    resnet_dropout: float = 0.1
     
     # EDM2 specific
-    rank_reduction_factor: float = 0.25
+    rank_reduction_factor: float = 0.5
     condition_modulation: bool = True
-    dropout_rate: float = 0.1
+    dropout_rate: float = 0.2
     dropout_preserve_magnitude: bool = True
-    time_embedding_dim: int = 128  # Add this line for time embedding dimension
+    time_embedding_dim: int = 256
     
     # Noise Schedule
     noise_schedule: Literal["edm", "ddim"] = "edm"
-    sigma_min: float = 0.002
-    sigma_max: float = 80.0
-    rho: float = 7.0
+    sigma_min: float = 0.001
+    sigma_max: float = 120.0
+    rho: float = 9.0
     
     # Training specific
     use_ema: bool = True
     ema_lengths: list = field(default_factory=lambda: [0.9999, 0.9995, 0.999])
     stratified_sampling: bool = True
     classifier_free_guidance: bool = True
-    guidance_scale: float = 3.0
-    label_dropout_prob: float = 0.1
+    guidance_scale: float = 5.0
+    label_dropout_prob: float = 0.2
 
 @dataclass
 class TrainingConfig:
@@ -55,12 +62,12 @@ class TrainingConfig:
     val_dir: str = "data/validation/processed"
     
     # Training
-    batch_size: int = 64
-    learning_rate: float = 1e-4
+    batch_size: int = 32
+    learning_rate: float = 5e-5
     num_epochs: int = 100
     save_interval: int = 10
-    gradient_accumulation_steps: int = 8
-    lr_warmup_steps: int = 5000
+    gradient_accumulation_steps: int = 16
+    lr_warmup_steps: int = 10000
     lr_decay_exponent: float = 1.0
     
     # Window parameters

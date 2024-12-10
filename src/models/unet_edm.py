@@ -17,28 +17,50 @@ class ResnetBlock(nn.Module):
         dim_out (int): Output dimension
         time_emb_dim (int, optional): Time embedding dimension for conditioning
     """
-    def __init__(self, dim, dim_out, time_emb_dim=None):
+    def __init__(self, dim, dim_out, time_emb_dim=None, *, groups=8, dropout=0.1, time_scale=1.0):
         super().__init__()
         
-        # Time embedding projection if provided
-        self.mlp = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(time_emb_dim, dim_out)
-        ) if time_emb_dim else None
-
-        # Main convolution blocks
+        # Adjust groups to be compatible with channel dimensions
+        groups = min(groups, dim)
+        while dim % groups != 0:
+            groups -= 1
+        
+        dim_out_groups = min(groups, dim_out)
+        while dim_out % dim_out_groups != 0:
+            dim_out_groups -= 1
+        
+        # Pixel normalization with adjusted groups
+        self.pixel_norm = nn.GroupNorm(groups, dim)
+        
+        # Enhanced time embedding MLP
+        if time_emb_dim is not None:
+            self.mlp = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(time_emb_dim, dim_out * 2),
+                nn.Dropout(p=dropout)
+            )
+            self.time_scale = time_scale
+        else:
+            self.mlp = None
+            
+        # Enhanced convolution blocks with groups
         self.block1 = nn.Sequential(
-            nn.Conv2d(dim, dim_out, 3, padding=1),
-            nn.BatchNorm2d(dim_out),
-            nn.GELU()
-        )
-        self.block2 = nn.Sequential(
-            nn.Conv2d(dim_out, dim_out, 3, padding=1),
-            nn.BatchNorm2d(dim_out)
+            nn.Conv2d(dim, dim_out, 3, padding=1, groups=1),
+            nn.GroupNorm(dim_out_groups, dim_out),
+            nn.SiLU()
         )
         
-        # Residual connection: if dimensions don't match, project input
-        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+        self.block2 = nn.Sequential(
+            nn.Conv2d(dim_out, dim_out, 3, padding=1, groups=1),
+            nn.GroupNorm(dim_out_groups, dim_out),
+            nn.Dropout(p=dropout)
+        )
+        
+        # Residual connection with group norm
+        self.res_conv = nn.Sequential(
+            nn.Conv2d(dim, dim_out, 1),
+            nn.GroupNorm(dim_out_groups, dim_out)
+        ) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb=None):
         """
@@ -51,11 +73,18 @@ class ResnetBlock(nn.Module):
         Returns:
             Tensor: Output tensor with residual connection
         """
-        h = self.block1(x)
+        h = self.pixel_norm(x)
+        h = self.block1(h)
         
-        # Add time embedding if provided
         if self.mlp and time_emb is not None:
-            h += self.mlp(time_emb)[:, :, None, None]  # Project and broadcast time embedding
+            time_emb = self.mlp(time_emb)
+            # Split time embeddings into scale and shift
+            scale, shift = time_emb.chunk(2, dim=1)
+            # Add proper broadcasting dimensions
+            scale = scale.view(scale.shape[0], -1, 1, 1)
+            shift = shift.view(shift.shape[0], -1, 1, 1)
+            # Apply scale and shift
+            h = h * (1 + scale * self.time_scale) + shift * self.time_scale
             
         h = self.block2(h)
         return h + self.res_conv(x)  # Residual connection
@@ -132,10 +161,17 @@ class UNetEDM(BaseModel):
         self.time_embedding_dim = config.edm2.time_embedding_dim
         self.dropout_rate = config.edm2.dropout_rate
         
-        # Time embedding network (sinusoidal embeddings -> MLP)
+        # Extract ResNet specific parameters
+        self.resnet_groups = config.edm2.resnet_groups
+        self.time_scale = config.edm2.resnet_time_scale
+        self.use_pixel_norm = config.edm2.use_pixel_norm
+        self.mlp_dim_mult = config.edm2.mlp_dim_mult
+        self.resnet_dropout = config.edm2.resnet_dropout
+        
+        # Time embedding network
         self.time_mlp = nn.Sequential(
             nn.Linear(self.time_embedding_dim, self.time_embedding_dim * 4),
-            nn.GELU(),
+            nn.SiLU(),
             nn.Linear(self.time_embedding_dim * 4, self.time_embedding_dim)
         )
         
@@ -147,15 +183,36 @@ class UNetEDM(BaseModel):
         in_channels = config.audio.in_channels
         for dim in self.hidden_dims:
             self.downs.append(nn.ModuleList([
-                ResnetBlock(in_channels, dim, self.time_embedding_dim),
-                ResnetBlock(dim, dim, self.time_embedding_dim),
-                nn.Conv2d(dim, dim, 4, 2, 1)
+                ResnetBlock(
+                    dim=in_channels, 
+                    dim_out=dim, 
+                    time_emb_dim=self.time_embedding_dim,
+                    groups=self.resnet_groups,
+                    dropout=self.dropout_rate,
+                    time_scale=self.time_scale
+                ),
+                ResnetBlock(
+                    dim=dim, 
+                    dim_out=dim, 
+                    time_emb_dim=self.time_embedding_dim,
+                    groups=self.resnet_groups,
+                    dropout=self.dropout_rate,
+                    time_scale=self.time_scale
+                ),
+                nn.Conv2d(dim, dim, kernel_size=4, stride=2, padding=1)
             ]))
             in_channels = dim
         
         # Middle blocks (at 5x5 resolution)
         mid_dim = self.hidden_dims[-1]
-        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, self.time_embedding_dim)
+        self.mid_block1 = ResnetBlock(
+            dim=mid_dim, 
+            dim_out=mid_dim, 
+            time_emb_dim=self.time_embedding_dim,
+            groups=self.resnet_groups,
+            dropout=self.dropout_rate,
+            time_scale=self.time_scale
+        )
         self.mid_attn = SelfAttention(mid_dim)
         self.mid_block2 = ResnetBlock(mid_dim, mid_dim, self.time_embedding_dim)
         
@@ -215,16 +272,15 @@ class UNetEDM(BaseModel):
         
         # Upsampling with skip connections
         for upsample, reduce_residual, block1, block2 in self.ups:
-            print(f"\n--- Upsampling Step ---")
-            print(f"Before upsample - h shape: {h.shape}")
             h = upsample(h)
-            print(f"After upsample - h shape: {h.shape}")
             residual = residuals.pop()
-            print(f"Residual shape: {residual.shape}")
             residual = reduce_residual(residual)
-            print(f"Reduced residual shape: {residual.shape}")
+            
+            # Add interpolation to match spatial dimensions
+            if h.shape[-2:] != residual.shape[-2:]:
+                h = F.interpolate(h, size=residual.shape[-2:], mode='bilinear', align_corners=False)
+            
             h = torch.cat((h, residual), dim=1)
-            print(f"After concatenation - h shape: {h.shape}")
             h = block1(h, t)
             h = block2(h, t)
         

@@ -122,18 +122,23 @@ def train_epoch(model, dataloader, optimizer, scheduler, config, max_grad_norm):
     
     with tqdm(dataloader, desc="Training") as pbar:
         for i, batch in enumerate(pbar):
-            # Get data
             data = batch['spectrogram'].to(model.get_device())
             
-            # Forward pass (different for VAE and EDM2)
             if isinstance(model, AudioVAE):
                 recon, x, mu, log_var = model(data)
                 loss, recons_loss, kld_loss = model.loss_function(recon, x, mu, log_var)
                 pbar.set_postfix({'loss': loss.item(), 'recon': recons_loss.item(), 'kld': kld_loss.item()})
             elif isinstance(model, UNetEDM):
                 time = torch.linspace(0, 1, steps=data.size(0)).to(model.get_device())
-                recon = model(data, time)
-                loss = F.mse_loss(recon, data)
+                
+                if config.edm2.use_pixel_norm:
+                    data_norm = data / (data.pow(2).mean(dim=1, keepdim=True).sqrt() + 1e-8)
+                    recon = model(data_norm, time)
+                    loss = F.mse_loss(recon, data_norm)
+                else:
+                    recon = model(data, time)
+                    loss = F.mse_loss(recon, data)
+                
                 pbar.set_postfix({'loss': loss.item()})
             
             # Backward pass
