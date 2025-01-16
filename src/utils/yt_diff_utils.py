@@ -1,3 +1,29 @@
+"""
+This file contains utility functions for the DualDiffusion model framework.
+
+Key functionality:
+- MPS (Metal Performance Shaders) initialization and configuration management for Mac
+- Audio processing utilities:
+  - Loading/saving audio files
+  - Audio format conversion and resampling
+  - Spectrogram generation and manipulation
+- Image processing utilities:
+  - Loading/saving images
+  - Color space conversions
+  - Image transformations and augmentations
+- Model utilities:
+  - TF32 precision control via context manager
+  - Multi-plot visualization helper
+  - SafeTensor loading/saving
+- File handling:
+  - JSON loading/saving
+  - File path management
+  - Audio metadata handling via mutagen
+
+The utilities in this file provide core functionality used throughout the DualDiffusion 
+codebase for data preprocessing, model training, and inference.
+"""
+
 import torch
 import safetensors.torch as ST
 from typing import Optional, Union, Any

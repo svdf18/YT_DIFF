@@ -1,5 +1,40 @@
 from typing import Optional
 
+"""
+This file contains the implementation of the MCLT (Modified Chirp-Like Transform) for audio processing.
+
+The MCLT is a signal processing transform that decomposes audio signals into frequency components 
+while preserving phase information. The key steps are:
+
+1. Windowing:
+   - The input signal is divided into overlapping frames
+   - Each frame is multiplied by a window function (e.g. Kaiser, Hann) to reduce spectral leakage
+   
+2. Modified DCT/DST:
+   - The windowed frames undergo a modified discrete cosine transform (MDCT)
+   - A modified discrete sine transform (MDST) is also applied
+   - These provide the real and imaginary components respectively
+
+3. Frequency Analysis:
+   - The MDCT/MDST coefficients represent frequency content
+   - Phase information is preserved through the complex representation
+   - Allows for high quality reconstruction of the original signal
+
+4. Inverse Transform:
+   - The inverse MCLT reconstructs the time domain signal
+   - Uses overlap-add synthesis with the analysis window
+   - Provides perfect reconstruction when using appropriate windows
+
+The MCLT is particularly useful for audio processing tasks like:
+- Compression and coding
+- Time-frequency analysis
+- Audio effects and modifications
+- Feature extraction for machine learning
+
+This implementation provides the core MCLT functionality along with various window 
+functions optimized for different applications.
+"""
+
 import torch
 
 class WindowFunction:

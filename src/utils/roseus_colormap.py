@@ -1,3 +1,7 @@
+"""
+This file contains the Roseus colormap for visualizing audio spectrograms.
+"""
+
 import numpy as np
 
 ROSEUS_COLORMAP = np.array([

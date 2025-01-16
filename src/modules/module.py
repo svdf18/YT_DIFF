@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import torch
 
-from utils.dual_diffusion_utils import load_safetensors, save_safetensors, torch_dtype
+from src.utils.yt_diff_utils import load_safetensors, save_safetensors, torch_dtype
 
 @dataclass
 class DualDiffusionModuleConfig(ABC):

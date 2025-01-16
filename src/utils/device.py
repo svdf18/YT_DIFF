@@ -1,4 +1,8 @@
 # src/utils/device.py
+"""
+This file contains the device initialization and configuration management for the YT_DIFF model framework.
+"""
+
 import torch
 
 def get_device():

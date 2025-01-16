@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 from typing import Union
 from json import dumps as json_dumps, load as json_load
 
+"""
+This file contains utility functions for loading and saving configuration files.
+"""
+
 def load_json(json_path: str) -> dict:
     """Load JSON file"""
     with open(json_path, "r") as f:
