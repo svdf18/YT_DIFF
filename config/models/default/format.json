@@ -1,6 +1,6 @@
 {
   "noise_floor": 2e-05,
-  "sample_rate": 44100,
+  "sample_rate": 32000,
   "sample_raw_channels": 2,
   "sample_raw_length": 1440000,
   "t_scale": null,
