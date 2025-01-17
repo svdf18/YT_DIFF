@@ -13,6 +13,8 @@ import torch
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 import wandb
+import matplotlib.pyplot as plt
+import numpy as np
 
 from src.modules.vaes.vae_edm2 import DualDiffusionVAE_EDM2, DualDiffusionVAE_EDM2Config
 from src.modules.formats.spectrogram import SpectrogramFormat, SpectrogramFormatConfig
@@ -26,23 +28,23 @@ class TrainingConfig:
     output_dir: str = "outputs/vae"
     pad_to_length: int = 256
     
-    # Training settings
-    batch_size: int = 16
-    num_workers: int = 4
-    max_steps: int = 100_000
-    save_every: int = 1000
-    eval_every: int = 100
+    # Training settings - Optimized for testing
+    batch_size: int = 4          # Reduced from 16 to start
+    num_workers: int = 2         # Reduced from 4 for testing
+    max_steps: int = 1000        # Reduced from 100_000 for initial testing
+    save_every: int = 100        # More frequent saves during testing
+    eval_every: int = 20         # More frequent evals to see progress
     
-    # Model settings
+    # Model settings - Kept the same for now
     model_channels: int = 96
     latent_channels: int = 4
     channel_mult: Tuple[int, ...] = (1, 2, 3, 5)
     num_layers_per_block: int = 3
     
     # Optimizer settings
-    learning_rate: float = 1e-4
+    learning_rate: float = 2e-4   # Slightly increased for faster initial learning
     
-    # Loss settings
+    # Loss settings - Kept the same
     block_overlap: int = 8
     block_widths: Tuple[int, ...] = (8, 16, 32, 64)
     channel_kl_loss_weight: float = 0.1

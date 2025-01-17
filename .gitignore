@@ -187,5 +187,8 @@ logs/
 data/
 audio_files/
 visualizations/
+# Weights & Biases
+wandb/
+
 
 # End of https://www.toptal.com/developers/gitignore/api/python
