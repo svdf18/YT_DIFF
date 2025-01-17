@@ -53,6 +53,9 @@ class SpectrogramFormatConfig(DualDiffusionFormatConfig):
     freq_scale_type: Literal["mel", "log"] = "mel"
     freq_scale_norm: Optional[str] = None
 
+    def __post_init__(self):
+        print(f"DEBUG: SpectrogramFormatConfig initialized with num_frequencies={self.num_frequencies}")
+
     @property
     def stereo(self) -> bool:
         return self.sample_raw_channels == 2
@@ -87,6 +90,8 @@ class SpectrogramConverter(torch.nn.Module):
     def __init__(self, config: SpectrogramFormatConfig):
         super().__init__()
         self.config = config
+        
+        print(f"DEBUG: SpectrogramConverter received config with num_frequencies={config.num_frequencies}")
         
         window_args = {
             "exponent": config.window_exponent,
@@ -149,8 +154,16 @@ class SpectrogramConverter(torch.nn.Module):
     @torch.inference_mode()
     def spectrogram_to_audio(self, spectrogram: torch.Tensor) -> torch.Tensor:
         """Convert frequency-scaled spectrogram back to audio"""
+        # Add debug prints
+        print(f"Input spectrogram shape: {spectrogram.shape}")
+        
         # Unscale frequencies before phase recovery
-        amplitudes_linear = self.freq_scale.unscale(spectrogram ** (1 / self.config.abs_exponent))
+        unscaled_spec = spectrogram ** (1 / self.config.abs_exponent)
+        print(f"Spectrogram shape after exponentiation: {unscaled_spec.shape}")
+        
+        amplitudes_linear = self.freq_scale.unscale(unscaled_spec)
+        print(f"Amplitudes shape after unscaling: {amplitudes_linear.shape}")
+        
         return self.inverse_spectrogram_func(amplitudes_linear)
 
     def get_ln_freqs(self, x: torch.Tensor) -> torch.Tensor:
@@ -166,6 +179,9 @@ class SpectrogramFormat(DualDiffusionFormat):
         super().__init__()
         self.config = config
         self.converter = SpectrogramConverter(config)
+        
+        # Add debug print
+        print(f"DEBUG: SpectrogramFormat initialized with num_frequencies={config.num_frequencies}")
     
     def get_num_channels(self) -> tuple[int, int]:
         """Get number of input/output channels"""

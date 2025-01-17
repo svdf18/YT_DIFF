@@ -1,4 +1,6 @@
 import os
+# Set MPS fallback before any other imports
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../"))
@@ -111,13 +113,13 @@ def main():
     # Create spectrogram format config
     spectrogram_config = SpectrogramFormatConfig(
         sample_rate=32000,          # Sample rate stays the same
-        step_size_ms=16,           # This controls hop_length (16ms = 512 samples at 32kHz)
-        window_duration_ms=64,     # This controls window size (64ms = 2048 samples at 32kHz)
+        step_size_ms=16,           # This controls hop_length
+        window_duration_ms=64,     # This controls window size
         padded_duration_ms=64,     # Same as window_duration_ms for no padding
-        num_frequencies=128,       # Number of frequency bins
-        min_frequency=20,         # Minimum frequency in Hz
-        max_frequency=16000,      # Maximum frequency in Hz
-        freq_scale_type="mel"     # Use mel scale
+        num_frequencies=256,       # Changed from 128 to 256 to match VAE output
+        min_frequency=20,         
+        max_frequency=16000,      
+        freq_scale_type="mel"     
     )
     
     trainer = VAETrainer(

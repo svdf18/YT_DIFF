@@ -3,6 +3,7 @@ from typing import Optional, Callable
 import torch
 from torch import Tensor
 from tqdm.auto import tqdm
+from src.utils.device import device  # Import the device utility
 
 def _get_complex_dtype(real_dtype: torch.dtype) -> torch.dtype:
     """Get corresponding complex dtype for real dtype
@@ -40,26 +41,14 @@ def griffinlim(
     manual_init: Optional[Tensor] = None,
     show_tqdm: bool = True,
 ) -> Tensor:
-    """Griffin-Lim algorithm for phase reconstruction
-    
-    Args:
-        specgram: Magnitude spectrogram
-        window: Window function
-        n_fft: FFT size
-        hop_length: Number of samples between frames
-        win_length: Window length
-        n_iter: Number of iterations
-        momentum: Momentum coefficient (0-1)
-        length: Target audio length
-        rand_init: Use random phase initialization
-        stereo: Process as stereo audio
-        stereo_coherence: Stereo coherence factor
-        manual_init: Manual phase initialization
-        show_tqdm: Show progress bar
-    
-    Returns:
-        Tensor: Reconstructed audio waveform
-    """
+    """Griffin-Lim algorithm for phase reconstruction"""
+    # Move everything to CPU for complex operations
+    original_device = specgram.device
+    specgram = specgram.cpu()
+    window = window.cpu()
+    if manual_init is not None:
+        manual_init = manual_init.cpu()
+
     if not 0 <= momentum < 1:
         raise ValueError(f"momentum must be in range [0, 1). Found: {momentum}")
     momentum = momentum / (1 + momentum)
@@ -78,12 +67,12 @@ def griffinlim(
     else:
         init_shape = (1,) + tuple(specgram.shape[1:])
         if rand_init:
-            angles = torch.randn(init_shape, dtype=_get_complex_dtype(specgram.dtype), device=specgram.device)
+            angles = torch.randn(init_shape, dtype=_get_complex_dtype(specgram.dtype), device='cpu')
         else:
-            angles = torch.full(init_shape, 1, dtype=_get_complex_dtype(specgram.dtype), device=specgram.device)
+            angles = torch.full(init_shape, 1, dtype=_get_complex_dtype(specgram.dtype), device='cpu')
         
     # Previous iteration state for momentum
-    tprev = torch.tensor(0.0, dtype=specgram.dtype, device=specgram.device)
+    tprev = torch.tensor(0.0, dtype=specgram.dtype, device='cpu')
 
     # Main iteration loop
     progress_bar = tqdm(total=n_iter) if show_tqdm else None
@@ -145,7 +134,8 @@ def griffinlim(
     if progress_bar is not None:
         progress_bar.close()
 
-    return waveform.reshape(shape[:-2] + waveform.shape[-1:])
+    # Move result back to original device
+    return waveform.reshape(shape[:-2] + waveform.shape[-1:]).to(original_device)
 
 class PhaseRecovery(torch.nn.Module):
     """Phase recovery module using Griffin-Lim algorithm"""
@@ -179,25 +169,21 @@ class PhaseRecovery(torch.nn.Module):
         self.stereo = stereo
         self.stereo_coherence = stereo_coherence
 
-        # Create and register window
+        # Create and register window - move to device from utils
         window = window_fn(self.win_length) if wkwargs is None else window_fn(self.win_length, **wkwargs)
-        self.register_buffer("window", window, persistent=False)
+        self.register_buffer("window", window.to(device), persistent=False)
 
     @torch.inference_mode()
     def forward(self, specgram: Tensor, n_fgla_iter: Optional[int] = None, show_tqdm: bool = True) -> Tensor:
-        """Apply phase recovery to spectrogram
-        
-        Args:
-            specgram: Input magnitude spectrogram
-            n_fgla_iter: Override number of iterations
-            show_tqdm: Show progress bar
-        
-        Returns:
-            Tensor: Reconstructed audio waveform
-        """
+        """Apply phase recovery to spectrogram"""
         n_fgla_iter = n_fgla_iter or self.n_fgla_iter
+        original_device = specgram.device
 
         if self.n_fgla_iter > 0:
+            # Move everything to CPU for processing
+            specgram = specgram.cpu()
+            self.window = self.window.cpu()
+            
             wave = griffinlim(
                 specgram,
                 self.window,
@@ -213,6 +199,9 @@ class PhaseRecovery(torch.nn.Module):
                 manual_init=None,
                 show_tqdm=show_tqdm,
             )
+            
+            # Move result back to original device
+            return wave.to(original_device)
         else:
             # Direct inverse if no iterations requested
             wave_shape = specgram.size()
@@ -221,8 +210,8 @@ class PhaseRecovery(torch.nn.Module):
                 n_fft=self.n_fft,
                 hop_length=self.hop_length,
                 win_length=self.win_length,
-                window=self.window,
+                window=self.window.cpu(),  # Ensure window is on CPU
                 length=self.length,
             ).reshape(wave_shape[:-2] + (-1,))
-
-        return wave
+            
+            return wave.to(original_device)

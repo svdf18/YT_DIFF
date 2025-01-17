@@ -1,0 +1,39 @@
+{
+  "os":  "macOS-14.6.1-arm64-arm-64bit",
+  "python":  "3.12.5",
+  "startedAt":  "2025-01-17T11:46:38.626310Z",
+  "program":  "/Users/simonformann/Documents/GitHub/4_semester/ML/YT_DIFF/src/training/train_vae.py",
+  "codePath":  "src/training/train_vae.py",
+  "git":  {
+    "remote":  "https://github.com/svdf18/YT_DIFF.git",
+    "commit":  "9e2efe62d4aa11cb961b8519aec068628801ef25"
+  },
+  "email":  "simonformann@gmail.com",
+  "root":  "/Users/simonformann/Documents/GitHub/4_semester/ML/YT_DIFF",
+  "host":  "Simons-MacBook-Pro-3.local",
+  "username":  "simonformann",
+  "executable":  "/Users/simonformann/Documents/GitHub/4_semester/ML/YT_DIFF/venv/bin/python",
+  "codePathLocal":  "src/training/train_vae.py",
+  "cpu_count":  10,
+  "cpu_count_logical":  10,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "779605905408"
+    }
+  },
+  "memory":  {
+    "total":  "68719476736"
+  },
+  "cpu":  {
+    "count":  10,
+    "countLogical":  10
+  },
+  "apple":  {
+    "name":  "Apple M1 Max",
+    "ecpuCores":  2,
+    "pcpuCores":  8,
+    "gpuCores":  24,
+    "memoryGb":  64
+  }
+}

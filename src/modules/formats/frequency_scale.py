@@ -62,7 +62,12 @@ class FrequencyScale(torch.nn.Module):
         unscale_driver: Literal["gels", "gelsy", "gelsd", "gelss"] = "gels",
     ) -> None:
         super().__init__()
-
+        
+        print(f"DEBUG: FrequencyScale initialized with:")
+        print(f"  - num_filters: {num_filters}")
+        print(f"  - num_stft_bins: {num_stft_bins}")
+        print(f"  - sample_rate: {sample_rate}")
+        
         self.freq_scale = freq_scale
         self.freq_min = freq_min
         self.freq_max = freq_max or sample_rate / 2
@@ -96,18 +101,81 @@ class FrequencyScale(torch.nn.Module):
     
     @torch.no_grad()
     def unscale(self, scaled: torch.Tensor) -> torch.Tensor:
-        """Inverse frequency scaling"""
-        # Move to CPU for lstsq operation
+        """Inverse frequency scaling using conjugate gradient descent"""
         device = scaled.device
-        scaled_cpu = scaled.cpu()
+        filters = self.filters.to(device)  # [1025, 256]
         
-        unscaled = torch.relu(torch.linalg.lstsq(
-            self.filters.cpu(),  # Move scale matrix to CPU too
-            scaled_cpu.reshape(-1, scaled.shape[-1])
-        ).solution)
+        print(f"\nDEBUG: Starting unscale operation")
+        print(f"Input scaled shape: {scaled.shape}")
+        print(f"Filter matrix shape: {filters.shape}")
         
-        # Move result back to original device
-        return unscaled.reshape(*scaled.shape).to(device)
+        # Reshape scaled tensor to preserve batch and time dimensions
+        batch_size = scaled.shape[0]
+        time_len = scaled.shape[-1]
+        scaled_2d = scaled.reshape(batch_size, -1, time_len)
+        print(f"After first reshape: {scaled_2d.shape}")
+        
+        scaled_2d = scaled_2d.transpose(-2, -1)
+        print(f"After transpose: {scaled_2d.shape}")
+        
+        scaled_2d = scaled_2d.reshape(-1, scaled_2d.shape[-1])  # [512, 256]
+        print(f"After final reshape: {scaled_2d.shape}")
+        
+        # Setup system Ax = b with regularization
+        reg_factor = 1e-6
+        A = filters.T @ filters  # [256, 256]
+        print(f"A matrix shape: {A.shape}")
+        
+        # Initialize solution and residual with correct shapes
+        x = torch.zeros(256, scaled_2d.shape[0], device=device)  # [256, 512]
+        print(f"Initial solution x shape: {x.shape}")
+        
+        r = scaled_2d.T - A @ x  # [256, 512]
+        print(f"Initial residual r shape: {r.shape}")
+        print(f"Debug: scaled_2d.T shape: {scaled_2d.T.shape}")
+        print(f"Debug: (A @ x) shape: {(A @ x).shape}")
+        p = r.clone()
+        print(f"Initial search direction p shape: {p.shape}")
+        
+        # Conjugate gradient iterations
+        max_iter = 50
+        tol = 1e-6
+        r_norm_sq = (r * r).sum(dim=0)
+        print(f"r_norm_sq shape: {r_norm_sq.shape}")
+        
+        print(f"Starting conjugate gradient iterations...")
+        for iter_num in range(max_iter):
+            Ap = A @ p
+            print(f"Iteration {iter_num + 1}: Ap shape: {Ap.shape}")
+            alpha = r_norm_sq / (p * Ap).sum(dim=0)
+            print(f"Iteration {iter_num + 1}: alpha shape: {alpha.shape}")
+            x += alpha.unsqueeze(0) * p
+            r_next = r - alpha.unsqueeze(0) * Ap
+            r_next_norm_sq = (r_next * r_next).sum(dim=0)
+            beta = r_next_norm_sq / r_norm_sq
+            r = r_next
+            r_norm_sq = r_next_norm_sq
+            if r_norm_sq.max() < tol:
+                print(f"Converged after {iter_num + 1} iterations")
+                break
+            p = r + beta.unsqueeze(0) * p
+        else:
+            print(f"Maximum iterations ({max_iter}) reached")
+        
+        # Transform back to full frequency space
+        unscaled = torch.relu(filters @ x)  # [1025, 512]
+        print(f"After frequency transform: {unscaled.shape}")
+        
+        # Reshape back to original dimensions
+        unscaled = unscaled.T.reshape(batch_size, time_len, -1)  # [2, 256, 1025]
+        print(f"After reshape to 3D: {unscaled.shape}")
+        
+        unscaled = unscaled.transpose(-2, -1)  # [2, 1025, 256]
+        print(f"Final output shape: {unscaled.shape}")
+        
+        print(f"Output value range: [{unscaled.min():.6f}, {unscaled.max():.6f}]")
+        
+        return unscaled
     
     @torch.no_grad()
     def get_unscaled(self, num_points: int, device: Optional[torch.device] = None) -> torch.Tensor:
@@ -123,9 +191,15 @@ class FrequencyScale(torch.nn.Module):
     @torch.no_grad()
     def get_filters(self) -> torch.Tensor:
         """Create filterbank matrix"""
+        print(f"DEBUG: Creating filters with:")
+        print(f"  - num_stft_bins: {self.num_stft_bins}")
+        print(f"  - num_filters: {self.num_filters}")
+        
         stft_freqs = torch.linspace(0, self.sample_rate / 2, self.num_stft_bins)
         unscaled_freqs = self.get_unscaled(self.num_filters + 2)
         filters = _create_triangular_filterbank(stft_freqs, unscaled_freqs)
+
+        print(f"DEBUG: Created filter matrix with shape: {filters.shape}")
 
         if self.filter_norm == "slaney":
             # Slaney-style mel scaling for constant energy per channel
