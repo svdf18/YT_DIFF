@@ -4,23 +4,23 @@ from dataclasses import dataclass
 import torch
 import numpy as np
 
-from modules.formats.format import DualDiffusionFormat
-from modules.vaes.vae import DualDiffusionVAEConfig, DualDiffusionVAE, IsotropicGaussianDistribution
-from modules.mp_tools import MPConv, normalize, resample, mp_silu, mp_sum
+from src.modules.formats.format import DualDiffusionFormat
+from src.modules.vaes.vae import DualDiffusionVAEConfig, DualDiffusionVAE, IsotropicGaussianDistribution
+from src.modules.mp_tools import MPConv, normalize, resample, mp_silu, mp_sum
 
 @dataclass
 class DualDiffusionVAE_EDM2Config(DualDiffusionVAEConfig):
     """Configuration for EDM2 VAE"""
-    model_channels: int = 256          # Base multiplier for channels
-    channel_mult: list[int] = (1,2,3,4)  # Channel multipliers per resolution
-    channel_mult_emb: Optional[int] = None  # Multiplier for embedding dimensionality
-    channels_per_head: int = 64        # Channels per attention head
-    num_layers_per_block: int = 2      # ResNet blocks per resolution
-    res_balance: float = 0.3           # Balance between main and residual branches
-    attn_balance: float = 0.3          # Balance between main and attention paths
-    mlp_multiplier: int = 1            # MLP channel multiplier
-    mlp_groups: int = 1                # MLP group count
-    add_mid_block_attention: bool = False  # Add attention in decoder mid-block
+    model_channels: int = 96           # Changed from 256 to match training
+    channel_mult: list[int] = (1,2,3,5)  # Changed to match training
+    channel_mult_emb: Optional[int] = None
+    channels_per_head: int = 64
+    num_layers_per_block: int = 3      # Changed from 2 to match training
+    res_balance: float = 0.3
+    attn_balance: float = 0.3
+    mlp_multiplier: int = 1
+    mlp_groups: int = 1
+    add_mid_block_attention: bool = False
 
 class Block(torch.nn.Module):
     """Basic building block for VAE with advanced features"""
@@ -45,7 +45,7 @@ class Block(torch.nn.Module):
 
         self.level = level
         self.use_attention = use_attention
-        self.num_heads = out_channels // channels_per_head
+        self.num_heads = max(1, out_channels // channels_per_head)  # Ensure at least 1 head
         self.out_channels = out_channels
         self.flavor = flavor
         self.resample_mode = resample_mode
@@ -54,16 +54,17 @@ class Block(torch.nn.Module):
         self.attn_balance = attn_balance
         self.clip_act = clip_act
         
-        # Main convolution path
-        self.conv_res0 = MPConv(out_channels if flavor == "enc" else in_channels,
-                               out_channels * mlp_multiplier, kernel=(3,3), groups=mlp_groups)
-        self.conv_res1 = MPConv(out_channels * mlp_multiplier, out_channels, kernel=(3,3), groups=mlp_groups)
-        self.conv_skip = MPConv(in_channels, out_channels, kernel=(1,1), groups=1) if in_channels != out_channels else None
+        # Main convolution path - ensure input/output channels are properly aligned
+        conv_in_channels = out_channels if flavor == "enc" else in_channels
+        self.conv_res0 = MPConv(conv_in_channels, out_channels * mlp_multiplier, kernel=(3,3), groups=1)
+        self.conv_res1 = MPConv(out_channels * mlp_multiplier, out_channels, kernel=(3,3), groups=1)
+        
+        # Skip connection - only create if channels differ
+        self.conv_skip = None if in_channels == out_channels else MPConv(in_channels, out_channels, kernel=(1,1), groups=1)
 
         # Embedding projections
         self.emb_gain = torch.nn.Parameter(torch.zeros([]))
-        self.emb_linear = MPConv(emb_channels, out_channels * mlp_multiplier,
-                                kernel=(1,1), groups=mlp_groups) if emb_channels != 0 else None
+        self.emb_linear = None if emb_channels == 0 else MPConv(emb_channels, out_channels * mlp_multiplier, kernel=(1,1), groups=1)
 
         # Attention components
         if self.use_attention:
@@ -77,25 +78,58 @@ class Block(torch.nn.Module):
             self.attn_proj = MPConv(out_channels, out_channels, kernel=(1,1))
 
     def forward(self, x: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
+        # First, ensure emb has same spatial dimensions as x, but with memory optimization
+        if emb.shape[-2:] != x.shape[-2:]:
+            # Use more memory-efficient interpolation
+            target_size = x.shape[-2:]  # Get target size
+            if target_size[0] * target_size[1] > emb.shape[-2] * emb.shape[-1]:
+                # If upsampling, do it in chunks to save memory
+                chunks = []
+                chunk_size = 4  # Adjust this value based on your memory constraints
+                for i in range(0, emb.shape[1], chunk_size):
+                    chunk = emb[:, i:i+chunk_size]
+                    chunk = torch.nn.functional.interpolate(
+                        chunk,
+                        size=target_size,
+                        mode='nearest'
+                    )
+                    chunks.append(chunk)
+                emb = torch.cat(chunks, dim=1)
+            else:
+                # If downsampling, we can do it all at once
+                emb = torch.nn.functional.interpolate(
+                    emb,
+                    size=target_size,
+                    mode='nearest'
+                )
+        
+        # Debug prints for input dimensions
+        print(f"Block input x shape: {x.shape}")
+        print(f"Block input emb shape: {emb.shape}")
+        
         # 1. Input Resampling
-        # Apply up/downsampling based on resample_mode
         x = resample(x, mode=self.resample_mode)
+        if self.resample_mode != "keep":
+            emb = resample(emb, mode=self.resample_mode)
+        print(f"After resample shape: {x.shape}")
 
         # 2. Encoder-specific Processing
-        # For encoder blocks, apply skip connection and pixel normalization
         if self.flavor == "enc":
             if self.conv_skip is not None:
                 x = self.conv_skip(x)
-            x = normalize(x, dim=1)  # pixel norm for stability
+            x = normalize(x, dim=1)
+        print(f"After encoder processing shape: {x.shape}")
 
         # 3. Main Convolution Path
-        # First conv with SiLU activation
         y = self.conv_res0(mp_silu(x))
+        print(f"After conv_res0 shape: {y.shape}")
 
         # 4. Embedding Conditioning
-        # Apply class/noise embedding conditioning
         if self.emb_linear is not None:
+            print(f"Before emb_linear - emb shape: {emb.shape}")
             c = self.emb_linear(emb, gain=self.emb_gain) + 1.
+            print(f"After emb_linear - c shape: {c.shape}")
+            print(f"y shape before multiplication: {y.shape}")
             y = mp_silu(y * c)  # multiplicative conditioning
 
         # 5. Dropout (with magnitude preservation)
@@ -155,9 +189,14 @@ class DualDiffusionVAE_EDM2(DualDiffusionVAE):
     def __init__(self, config: DualDiffusionVAE_EDM2Config) -> None:
         super().__init__()
         self.config = config
+        
+        # Enable gradient checkpointing
+        self.gradient_checkpointing = True
 
-        # 1. Calculate channel dimensions
-        # Base channel count for each resolution level
+        # Add output gain parameter
+        self.out_gain = torch.nn.Parameter(torch.ones([]))  # Initialize to 1.0
+        
+        # Calculate channel dimensions
         cblock = [config.model_channels * mult for mult in config.channel_mult]
         self.num_levels = len(cblock)
 
@@ -174,26 +213,18 @@ class DualDiffusionVAE_EDM2(DualDiffusionVAE):
             channels_per_head=config.channels_per_head
         )
 
-        # 3. Class embedding
-        if config.label_dim != 0:
-            self.emb_label = MPConv(config.label_dim, cemb, kernel=(1,1))
-
-        # 4. Reconstruction loss parameters
-        self.register_buffer('recon_loss_logvar', torch.zeros([]))
-        self.register_buffer('latents_out_gain', torch.ones([]))
-        self.register_buffer('out_gain', torch.ones([]))
-
-        # 5. Encoder architecture
+        # 3. Encoder architecture
         self.enc = torch.nn.ModuleDict()
-        cout = config.in_channels + 2  # Extra channels: 1 const, 1 pos embedding
+        # Initial input has 4 channels: 2 for audio + 1 const + 1 pos
+        cout = config.in_channels + 2  
+        
+        # First convolution to match model dimensions
+        self.conv_in = MPConv(cout, config.model_channels, kernel=(3,3))
+        cout = config.model_channels
+
         for level, channels in enumerate(cblock):
-            # Input convolution at first level
-            if level == 0:
-                cin = cout
-                cout = channels
-                self.enc[f"conv_in"] = MPConv(cin, cout, kernel=(3,3))
-            else:
-                # Downsampling block
+            # Downsampling block (except first level)
+            if level > 0:
                 self.enc[f"block{level}_down"] = Block(level, cout, cout, cemb,
                     use_attention=False, flavor="enc", resample_mode="down", **block_kwargs)
             
@@ -205,8 +236,11 @@ class DualDiffusionVAE_EDM2(DualDiffusionVAE):
                     use_attention=False, flavor="enc", **block_kwargs)
 
         # 6. Latent processing
-        self.conv_latents_out = MPConv(cout, config.latent_channels, kernel=(3,3))
-        self.conv_latents_in = MPConv(config.latent_channels + 2, cout, kernel=(3,3))  # Extra channels as in encoder
+        self.conv_latents_out = MPConv(cout, config.latent_channels * 2, kernel=(3,3))  # *2 for mu and logvar
+        
+        # Fix: Add the number of extra channels (const + pos_h) to latent channels
+        latent_in_channels = config.latent_channels + 2  # latent channels + const + pos_h
+        self.conv_latents_in = MPConv(latent_in_channels, cout, kernel=(3,3))
 
         # 7. Decoder architecture
         self.dec = torch.nn.ModuleDict()
@@ -231,3 +265,79 @@ class DualDiffusionVAE_EDM2(DualDiffusionVAE):
 
         # 8. Output convolution
         self.conv_out = MPConv(cout, config.out_channels, kernel=(3,3))
+
+    def encode(self, x: torch.Tensor) -> IsotropicGaussianDistribution:
+        """Encode input to latent distribution"""
+        # Add positional and constant channels
+        B, C, H, W = x.shape
+        # Create pos encoding for both height and width dimensions
+        pos_h = torch.linspace(-1, 1, H, device=x.device).view(1, 1, -1, 1).expand(B, 1, H, W)
+        pos_w = torch.linspace(-1, 1, W, device=x.device).view(1, 1, 1, -1).expand(B, 1, H, W)
+        const = torch.ones(B, 1, H, W, device=x.device)
+        
+        # Concatenate input with positional encodings and constant
+        x = torch.cat([x, const, pos_h], dim=1)
+        
+        # Initial convolution to get to model dimensions
+        x = self.conv_in(x)
+        
+        # Create embeddings with correct shape - add spatial dimensions
+        emb = torch.zeros(B, self.config.model_channels * (self.config.channel_mult_emb or self.config.channel_mult[-1]), 
+                          1, 1, device=x.device)  # Added 1,1 for spatial dimensions
+        emb = emb.expand(-1, -1, H, W)  # Expand to match spatial dimensions of x
+        
+        # Run through encoder blocks
+        for name, block in self.enc.items():
+            x = block(x, emb)
+        
+        # Get latent parameters
+        params = self.conv_latents_out(x)
+        mu, logvar = params.chunk(2, dim=1)
+        
+        return IsotropicGaussianDistribution(mu, logvar)
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode latent to output"""
+        # Add positional and constant channels
+        B, C, H, W = z.shape
+        pos_h = torch.linspace(-1, 1, H, device=z.device).view(1, 1, -1, 1).expand(B, 1, H, W)
+        const = torch.ones(B, 1, H, W, device=z.device)
+        
+        # Only add const and one positional encoding, like in encode
+        x = torch.cat([z, const, pos_h], dim=1)
+        
+        # Create embeddings with correct shape - add spatial dimensions
+        emb = torch.zeros(B, self.config.model_channels * (self.config.channel_mult_emb or self.config.channel_mult[-1]), 
+                          1, 1, device=z.device)
+        emb = emb.expand(-1, -1, H, W)  # Expand to match spatial dimensions of x
+        
+        # Initial convolution
+        x = self.conv_latents_in(x)
+        
+        # Run through decoder blocks
+        for name, block in self.dec.items():
+            x = block(x, emb)
+        
+        # Final convolution
+        x = self.conv_out(x)
+        return x * self.out_gain
+
+    def get_latent_shape(self, batch_size: int) -> tuple:
+        # Return shape of latent space
+        pass
+
+    def get_sample_shape(self, batch_size: int) -> tuple:
+        # Return shape of output samples
+        pass
+
+    def get_class_embeddings(self, labels: torch.Tensor) -> torch.Tensor:
+        # Return embeddings for class labels
+        pass
+
+    def get_recon_loss_logvar(self) -> torch.Tensor:
+        # Return reconstruction loss log variance
+        pass
+
+    def get_target_snr(self) -> float:
+        # Return target signal-to-noise ratio
+        pass

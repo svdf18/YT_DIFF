@@ -5,8 +5,8 @@
   "num_channels": 2,
   "min_sample_rate": 32000,
   "min_kbps": 0,
-  "min_sample_length": 1442048,
-  "max_sample_length": 4800000,
+  "min_sample_length": 8000,
+  "max_sample_length": 320000,
   "min_num_class_samples": 0,
 
   "dataset_processor_verbose": true,
@@ -19,9 +19,16 @@
   "pre_encoded_latents_enable_quantization": false,
 
   "clap_enable_fusion": false,
+  "category_mapping": {
+    "bass": ["808", "sine"],
+    "drums": ["kick", "snare"]
+  },
   "clap_embedding_labels": {
-    "drums": ["snare", "kick", "beat"],
-    "bass": ["bass", "sub bass", "808"]
+    "808": ["808", "bass"],
+    "sine": ["sine", "bass"],
+    "kick": ["kick", "drums"],
+    "snare": ["snare", "drums"]
   },
   "clap_embedding_tags": []
 }
+

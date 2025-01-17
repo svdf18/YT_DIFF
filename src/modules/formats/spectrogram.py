@@ -7,6 +7,7 @@ from typing import Optional, Union, Literal
 
 from .format import DualDiffusionFormat, DualDiffusionFormatConfig
 from .phase_recovery import PhaseRecovery
+from .frequency_scale import FrequencyScale
 
 @dataclass
 class SpectrogramFormatConfig(DualDiffusionFormatConfig):
@@ -23,6 +24,8 @@ class SpectrogramFormatConfig(DualDiffusionFormatConfig):
         num_frequencies: Number of frequency bins
         min_frequency: Minimum frequency in Hz
         max_frequency: Maximum frequency in Hz
+        freq_scale_type: Type of frequency scaling
+        freq_scale_norm: Normalization for frequency scaling
     """
     abs_exponent: float = 0.25
     
@@ -45,6 +48,10 @@ class SpectrogramFormatConfig(DualDiffusionFormatConfig):
     num_griffin_lim_iters: int = 200
     momentum: float = 0.99
     stereo_coherence: float = 0.67
+    
+    # Add frequency scale parameters
+    freq_scale_type: Literal["mel", "log"] = "mel"
+    freq_scale_norm: Optional[str] = None
 
     @property
     def stereo(self) -> bool:
@@ -104,7 +111,7 @@ class SpectrogramConverter(torch.nn.Module):
         # Initialize phase recovery for inverse transform
         self.inverse_spectrogram_func = PhaseRecovery(
             n_fft=config.padded_length,
-            n_iter=config.num_griffin_lim_iters,
+            n_fgla_iter=config.num_griffin_lim_iters,
             win_length=config.win_length,
             hop_length=config.hop_length,
             window_fn=self.hann_power_window,
@@ -116,6 +123,17 @@ class SpectrogramConverter(torch.nn.Module):
             stereo_coherence=config.stereo_coherence
         )
 
+        # Initialize frequency scaling
+        self.freq_scale = FrequencyScale(
+            freq_scale=config.freq_scale_type,
+            freq_min=config.min_frequency,
+            freq_max=config.max_frequency,
+            sample_rate=config.sample_rate,
+            num_stft_bins=config.num_stft_bins,
+            num_filters=config.num_frequencies,
+            filter_norm=config.freq_scale_norm,
+        )
+
     def get_spectrogram_shape(self, audio_shape: torch.Size) -> torch.Size:
         """Calculate output spectrogram shape for given audio input shape"""
         num_frames = 1 + (audio_shape[-1] + self.config.padded_length - self.config.win_length) // self.config.hop_length
@@ -123,15 +141,23 @@ class SpectrogramConverter(torch.nn.Module):
 
     @torch.inference_mode()
     def audio_to_spectrogram(self, audio: torch.Tensor) -> torch.Tensor:
-        """Convert audio to spectrogram representation"""
+        """Convert audio to frequency-scaled spectrogram"""
         spectrogram_complex = self.spectrogram_func(audio)
-        return spectrogram_complex.abs() ** self.config.abs_exponent
+        # Apply frequency scaling before exponentiation
+        return self.freq_scale.scale(spectrogram_complex.abs()) ** self.config.abs_exponent
 
     @torch.inference_mode()
     def spectrogram_to_audio(self, spectrogram: torch.Tensor) -> torch.Tensor:
-        """Convert spectrogram back to audio using phase recovery"""
-        amplitudes = spectrogram ** (1 / self.config.abs_exponent)
-        return self.inverse_spectrogram_func(amplitudes)
+        """Convert frequency-scaled spectrogram back to audio"""
+        # Unscale frequencies before phase recovery
+        amplitudes_linear = self.freq_scale.unscale(spectrogram ** (1 / self.config.abs_exponent))
+        return self.inverse_spectrogram_func(amplitudes_linear)
+
+    def get_ln_freqs(self, x: torch.Tensor) -> torch.Tensor:
+        """Get log-scaled frequencies using the frequency scaler"""
+        ln_freqs = self.freq_scale.get_unscaled(x.shape[2] + 2, device=x.device)[1:-1].log2()
+        ln_freqs = ln_freqs.view(1, 1,-1, 1).repeat(x.shape[0], 1, 1, x.shape[3])
+        return ((ln_freqs - ln_freqs.mean()) / ln_freqs.std()).to(x.dtype)
 
 class SpectrogramFormat(DualDiffusionFormat):
     """Main spectrogram format handler"""
@@ -145,6 +171,27 @@ class SpectrogramFormat(DualDiffusionFormat):
         """Get number of input/output channels"""
         in_channels = out_channels = self.config.sample_raw_channels
         return (in_channels, out_channels)
+    
+    def sample_raw_crop_width(self, length: Optional[int] = None) -> int:
+        if length is None:
+            length = self.config.sample_raw_length
+        return length
+    
+    def get_sample_shape(self, bsz: int = 1, length: Optional[int] = None) -> tuple:
+        if length is None:
+            length = self.config.sample_raw_length
+        audio_shape = (bsz, self.config.sample_raw_channels, length)
+        return self.converter.get_spectrogram_shape(audio_shape)
+    
+    def get_ln_freqs(self, x: torch.Tensor) -> torch.Tensor:
+        freqs = torch.linspace(
+            self.config.min_frequency,
+            self.config.max_frequency,
+            self.config.num_frequencies,
+            device=x.device
+        )
+        ln_freqs = torch.log(freqs)
+        return (ln_freqs - ln_freqs.mean()) / ln_freqs.std()
     
     @torch.inference_mode()
     def raw_to_sample(self, raw_samples: torch.Tensor,

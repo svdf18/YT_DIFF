@@ -18,7 +18,7 @@ Key components and workflow:
    - Handles mono/stereo channel conversion
 
 3. Data Preprocessing:
-   - Pre-encodes audio into VAE latent space (optional)
+   - Pre-encodes audio into VAE latent space
    - Generates data augmentations:
      - Time offsets
      - Pitch shifts 

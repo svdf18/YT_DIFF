@@ -95,19 +95,19 @@ class FrequencyScale(torch.nn.Module):
         return torch.matmul(specgram.transpose(-1, -2), self.filters).transpose(-1, -2)
     
     @torch.no_grad()
-    def unscale(self, spectrogram: torch.Tensor) -> torch.Tensor:
+    def unscale(self, scaled: torch.Tensor) -> torch.Tensor:
         """Inverse frequency scaling"""
-        original_shape = spectrogram.size()
-        spectrogram = spectrogram.view(-1, original_shape[-2], original_shape[-1])
+        # Move to CPU for lstsq operation
+        device = scaled.device
+        scaled_cpu = scaled.cpu()
         
-        # Use least squares to approximate inverse
         unscaled = torch.relu(torch.linalg.lstsq(
-            self.filters.transpose(-1, -2)[None],
-            spectrogram, 
-            driver=self.unscale_driver
+            self.filters.cpu(),  # Move scale matrix to CPU too
+            scaled_cpu.reshape(-1, scaled.shape[-1])
         ).solution)
         
-        return unscaled.view(original_shape[:-2] + (self.num_stft_bins, original_shape[-1]))
+        # Move result back to original device
+        return unscaled.reshape(*scaled.shape).to(device)
     
     @torch.no_grad()
     def get_unscaled(self, num_points: int, device: Optional[torch.device] = None) -> torch.Tensor:

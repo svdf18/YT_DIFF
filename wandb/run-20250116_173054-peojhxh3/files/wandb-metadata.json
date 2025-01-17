@@ -1,0 +1,17 @@
+{
+  "os":  "macOS-14.6.1-arm64-arm-64bit",
+  "python":  "3.12.5",
+  "startedAt":  "2025-01-16T16:30:54.821949Z",
+  "program":  "/Users/simonformann/Documents/GitHub/4_semester/ML/YT_DIFF/src/training/train_vae.py",
+  "codePath":  "src/training/train_vae.py",
+  "git":  {
+    "remote":  "https://github.com/svdf18/YT_DIFF.git",
+    "commit":  "9698de37d86247cbb92194efd23b03c8bef425a6"
+  },
+  "email":  "simonformann@gmail.com",
+  "root":  "/Users/simonformann/Documents/GitHub/4_semester/ML/YT_DIFF",
+  "host":  "Simons-MacBook-Pro-3.local",
+  "username":  "simonformann",
+  "executable":  "/Users/simonformann/Documents/GitHub/4_semester/ML/YT_DIFF/venv/bin/python",
+  "codePathLocal":  "src/training/train_vae.py"
+}
