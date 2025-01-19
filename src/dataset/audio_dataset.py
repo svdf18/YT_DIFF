@@ -65,6 +65,15 @@ class AudioDataset(Dataset):
             start = (current_length - self.pad_to_length) // 2
             return audio[..., start:start + self.pad_to_length]
 
+    def _get_category(self, file_path: str) -> str:
+        # Extract category from path (e.g., "808" from "808/JUBILEE_808_peanut_F.pt")
+        return file_path.split('/')[1]  # Gets "808"
+    
+    def _get_labels(self, file_path: str) -> list:
+        # Extract labels from filename (e.g., ["JUBILEE", "peanut", "F"] from "JUBILEE_808_peanut_F.pt")
+        filename = file_path.split('/')[-1].replace('.pt', '')
+        return filename.split('_')  # Returns ["JUBILEE", "808", "peanut", "F"]
+
     def __getitem__(self, idx: int) -> dict:
         """Load a single spectrogram file
         
@@ -84,8 +93,8 @@ class AudioDataset(Dataset):
         return {
             'audio': audio,
             'path': str(file_path),
-            'category': data.get('category', 'unknown'),
-            'labels': data.get('labels', [])
+            'category': self._get_category(str(file_path)),
+            'labels': self._get_labels(str(file_path))
         }
 
     @staticmethod

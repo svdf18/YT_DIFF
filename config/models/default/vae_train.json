@@ -40,7 +40,8 @@
     "dataset_num_proc": null,
     "dataloader_num_workers": 8,
     "pin_memory": false,
-    "prefetch_factor": 3
+    "prefetch_factor": 3,
+    "persistent_workers": true
   },
   "logging": {
     "logging_dir": null,

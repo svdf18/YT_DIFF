@@ -31,23 +31,23 @@ class SpectrogramFormatConfig(DualDiffusionFormatConfig):
     
     # FFT parameters
     sample_rate: int = 32000
-    step_size_ms: int = 8
+    step_size_ms: int = 8        # Consistent hop size
     
     # Window settings
-    window_duration_ms: int = 200
-    padded_duration_ms: int = 200
-    window_exponent: float = 32
+    window_duration_ms: int = 64  # Shorter window for better time resolution
+    padded_duration_ms: int = 64  # Match window duration
+    window_exponent: float = 32   # Keep existing power
     window_periodic: bool = True
     
     # Frequency scale parameters
     num_frequencies: int = 256
     min_frequency: int = 20
-    max_frequency: int = 16000
+    max_frequency: int = 20000
     
     # Phase recovery parameters
     num_griffin_lim_iters: int = 200
     momentum: float = 0.99
-    stereo_coherence: float = 0.67
+    stereo_coherence: float = 0.8
     
     # Add frequency scale parameters
     freq_scale_type: Literal["mel", "log"] = "mel"

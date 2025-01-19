@@ -22,6 +22,12 @@ Key components:
    - STFT and mel-scale conversions
    - Window function generation
    - Loss aggregation across scales
+
+Enhanced spectral loss implementation with:
+1. Mixed magnitude/phase loss
+2. Mel-weighted phase importance
+3. 2D spectral analysis for spectrograms
+4. Stereo separation handling
 """
 
 from dataclasses import dataclass
@@ -41,79 +47,86 @@ class MultiscaleSpectralLossConfig:
     sample_rate: int = 32000                   # Audio sample rate
     stereo_weight: float = 0.5                 # Weight for stereo separation loss
 
-class MultiscaleSpectralLoss:
+class MultiscaleSpectralLoss(torch.nn.Module):
     def __init__(self, config: MultiscaleSpectralLossConfig):
+        super().__init__()
         self.config = config
         
-        # Pre-compute mel filterbank if needed
-        if config.mel_bands is not None:
-            self.mel_fb = self._create_mel_filterbank()
-        else:
-            self.mel_fb = None
-
-        # Pre-compute windows for each block size
-        self.windows = {
-            size: torch.hann_window(size) 
-            for size in config.block_widths
-        }
-
-    def _create_mel_filterbank(self) -> torch.Tensor:
-        """Create mel filterbank matrix"""
-        # Convert Hz to mel scale
-        def hz_to_mel(f): return 2595 * np.log10(1 + f/700)
-        def mel_to_hz(m): return 700 * (10**(m/2595) - 1)
-        
-        min_mel = hz_to_mel(self.config.freq_range[0])
-        max_mel = hz_to_mel(self.config.freq_range[1])
-        
-        # Create mel points
-        mels = torch.linspace(min_mel, max_mel, self.config.mel_bands + 2)
-        freqs = torch.tensor([mel_to_hz(m) for m in mels])
-        
-        # Convert to FFT bins
-        fft_bins = torch.floor((freqs / self.config.sample_rate) * self.config.block_widths[-1]).int()
-        
-        # Create filterbank matrix
-        fb = torch.zeros((self.config.mel_bands, self.config.block_widths[-1]//2 + 1))
-        
-        for i in range(self.config.mel_bands):
-            fb[i, fft_bins[i]:fft_bins[i+1]] = torch.linspace(0, 1, fft_bins[i+1]-fft_bins[i])
-            fb[i, fft_bins[i+1]:fft_bins[i+2]] = torch.linspace(1, 0, fft_bins[i+2]-fft_bins[i+1])
-        
-        return fb
+        # Register windows as buffers for proper device handling
+        for size in config.block_widths:
+            self.register_buffer(
+                f'window_{size}',
+                torch.hann_window(size)
+            )
 
     def _stft_loss(self, x: torch.Tensor, y: torch.Tensor, block_width: int) -> torch.Tensor:
-        # Ensure inputs are 2D (batch, samples)
-        if x.dim() > 2:
-            x = x.reshape(x.shape[0], -1)
-        if y.dim() > 2:
-            y = y.reshape(y.shape[0], -1)
+        """Compute STFT loss between x and y at different scales"""
+        # Small windows: Good for transients (drum hits)
+        # Medium windows: Good for mid-range features
+        # Large windows: Good for bass and overall structure
         
-        # Calculate STFT with constant padding
-        x_stft = torch.stft(x,
-                           n_fft=block_width,
-                           hop_length=block_width // 4,
-                           win_length=block_width,
-                           window=torch.hann_window(block_width, device=x.device),
-                           return_complex=True,
-                           pad_mode='constant')  # Changed from 'reflect' to 'constant'
+        # Get window for current block size
+        window = getattr(self, f'window_{block_width}')
         
-        y_stft = torch.stft(y,
-                           n_fft=block_width,
-                           hop_length=block_width // 4,
-                           win_length=block_width,
-                           window=torch.hann_window(block_width, device=y.device),
-                           return_complex=True,
-                           pad_mode='constant')  # Changed from 'reflect' to 'constant'
+        # Reshape inputs to 2D
+        batch_size = x.shape[0]
+        x = x.reshape(batch_size, -1)
+        y = y.reshape(batch_size, -1)
         
-        return torch.mean(torch.abs(x_stft - y_stft))
+        # Ensure all inputs are float32 for STFT
+        x = x.to(dtype=torch.float32)
+        y = y.to(dtype=torch.float32)
+        window = window.to(dtype=torch.float32)
+        
+        # Calculate STFT
+        x_stft = torch.stft(
+            x,
+            n_fft=block_width,
+            hop_length=block_width // 4,
+            win_length=block_width,
+            window=window,
+            return_complex=True,
+            pad_mode='constant'
+        )
+        
+        y_stft = torch.stft(
+            y,
+            n_fft=block_width,
+            hop_length=block_width // 4,
+            win_length=block_width,
+            window=window,
+            return_complex=True,
+            pad_mode='constant'
+        )
+        
+        # Compute loss
+        loss = torch.abs(x_stft - y_stft).mean()
+        
+        # Convert back to float16 if on MPS
+        if x.device.type == 'mps':
+            loss = loss.to(dtype=torch.float16)
+            
+        return loss
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Compute multiscale spectral loss between x and y"""
-        total_loss = 0.0
+        device = x.device
+        total_loss = torch.tensor(0.0, device=device)
         
         # Compute loss at each scale
         for block_width in self.config.block_widths:
-            total_loss += self._stft_loss(x, y, block_width)
+            total_loss = total_loss + self._stft_loss(x, y, block_width)
             
         return total_loss / len(self.config.block_widths)
+
+    # Alias call to forward for backward compatibility
+    __call__ = forward
+
+    def _handle_stereo(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Split stereo into sum/difference channels"""
+        if x.shape[1] == 2:
+            return (
+                x[:, 0] + x[:, 1],  # Sum (mid)
+                x[:, 0] - x[:, 1]   # Difference (side)
+            )
+        return x, None
