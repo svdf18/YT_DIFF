@@ -19,8 +19,8 @@ def get_device():
         # For certain operations that aren't supported on MPS,
         # we'll need to fall back to CPU
         os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
-        logger.info("MPS device available. CPU fallback enabled for unsupported operations.")
-        return torch.device("cpu")  # Using CPU by default for better compatibility
+        logger.info("MPS device available. Using MPS with CPU fallback for specific operations.")
+        return torch.device("mps")  # Return MPS device directly
     
     logger.info("Using CPU device.")
     return torch.device("cpu")
