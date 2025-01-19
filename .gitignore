@@ -185,10 +185,14 @@ checkpoints/
 # Directories
 logs/
 data/
+dataset/
 audio_files/
 visualizations/
+outputs/
+
 # Weights & Biases
 wandb/
+
 
 
 # End of https://www.toptal.com/developers/gitignore/api/python
