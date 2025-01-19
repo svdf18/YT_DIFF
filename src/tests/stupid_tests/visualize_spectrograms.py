@@ -7,17 +7,29 @@ import numpy as np
 def plot_spectrogram(spec_data, title, save_path=None):
     """Plot a single spectrogram"""
     # Get spectrogram and metadata
-    spec = spec_data['audio'][0]  # Remove batch dimension
+    spec = spec_data['audio']  # Shape should be [2, 256, T]
     metadata = spec_data['metadata']
+    
+    print(f"DEBUG: Spectrogram shape: {spec.shape}")
     
     # Create figure
     plt.figure(figsize=(12, 6))
     
     # Plot both channels side by side for stereo
-    for i in range(spec.shape[0]):
+    for i in range(spec.shape[0]):  # Iterate over stereo channels
         plt.subplot(1, 2, i+1)
+        
+        # Reshape if needed and convert to numpy
+        channel_data = spec[i].numpy()  # Should be [256, T]
+        if len(channel_data.shape) == 1:
+            print(f"WARNING: Reshaping channel data from {channel_data.shape}")
+            # Attempt to reshape to 2D
+            time_frames = len(channel_data) // 256
+            channel_data = channel_data.reshape(256, -1)
+            print(f"Reshaped to: {channel_data.shape}")
+        
         plt.imshow(
-            spec[i].numpy(),
+            channel_data,
             aspect='auto',
             origin='lower',
             interpolation='nearest',
@@ -60,18 +72,24 @@ def visualize_dataset(processed_dir, output_dir=None, max_per_category=5):
         
         # Plot each file
         for pt_file in pt_files:
-            spec_data = torch.load(pt_file)
-            
-            if output_dir:
-                save_path = os.path.join(output_dir, f"{pt_file.stem}.png")
-            else:
-                save_path = None
+            try:
+                spec_data = torch.load(pt_file)
+                print(f"\nProcessing {pt_file.name}")
+                print(f"Loaded spectrogram shape: {spec_data['audio'].shape}")
                 
-            plot_spectrogram(
-                spec_data,
-                f"File: {pt_file.name}",
-                save_path
-            )
+                if output_dir:
+                    save_path = os.path.join(output_dir, f"{pt_file.stem}.png")
+                else:
+                    save_path = None
+                    
+                plot_spectrogram(
+                    spec_data,
+                    f"File: {pt_file.name}",
+                    save_path
+                )
+            except Exception as e:
+                print(f"Error processing {pt_file}: {str(e)}")
+                continue
 
 if __name__ == "__main__":
     # Visualize spectrograms
