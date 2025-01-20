@@ -52,71 +52,79 @@ class MultiscaleSpectralLoss(torch.nn.Module):
         super().__init__()
         self.config = config
         
-        # Register windows as buffers for proper device handling
-        for size in config.block_widths:
-            self.register_buffer(
-                f'window_{size}',
-                torch.hann_window(size)
-            )
-
+        # Create windows for each block width
+        self.windows = {}
+        for block_width in config.block_widths:
+            window = torch.hann_window(block_width)
+            self.register_buffer(f'window_{block_width}', window)
+    
     def _stft_loss(self, x: torch.Tensor, y: torch.Tensor, block_width: int) -> torch.Tensor:
-        """Compute STFT loss between x and y at different scales"""
-        # Small windows: Good for transients (drum hits)
-        # Medium windows: Good for mid-range features
-        # Large windows: Good for bass and overall structure
-        
-        # Get window for current block size
+        """Compute STFT loss for a specific block width"""
+        # Get the correct window for this block width
         window = getattr(self, f'window_{block_width}')
         
-        # Reshape inputs to 2D
-        batch_size = x.shape[0]
-        x = x.reshape(batch_size, -1)
-        y = y.reshape(batch_size, -1)
+        # Process each channel separately
+        total_loss = 0.0
+        batch_size, channels, freq, time = x.shape
         
-        # Ensure all inputs are float32 for STFT
-        x = x.to(dtype=torch.float32)
-        y = y.to(dtype=torch.float32)
-        window = window.to(dtype=torch.float32)
-        
-        # Calculate STFT
-        x_stft = torch.stft(
-            x,
-            n_fft=block_width,
-            hop_length=block_width // 4,
-            win_length=block_width,
-            window=window,
-            return_complex=True,
-            pad_mode='constant'
-        )
-        
-        y_stft = torch.stft(
-            y,
-            n_fft=block_width,
-            hop_length=block_width // 4,
-            win_length=block_width,
-            window=window,
-            return_complex=True,
-            pad_mode='constant'
-        )
-        
-        # Compute loss
-        loss = torch.abs(x_stft - y_stft).mean()
-        
-        # Convert back to float16 if on MPS
-        if x.device.type == 'mps':
-            loss = loss.to(dtype=torch.float16)
+        for c in range(channels):
+            # Get channel data
+            x_ch = x[:, c].reshape(batch_size, freq * time)
+            y_ch = y[:, c].reshape(batch_size, freq * time)
             
-        return loss
-
+            # Compute STFTs
+            x_stft = torch.stft(
+                x_ch,
+                n_fft=block_width,
+                hop_length=block_width // self.config.block_overlap,
+                win_length=block_width,
+                window=window,
+                return_complex=True,
+                pad_mode='constant'
+            )
+            
+            y_stft = torch.stft(
+                y_ch,
+                n_fft=block_width,
+                hop_length=block_width // self.config.block_overlap,
+                win_length=block_width,
+                window=window,
+                return_complex=True,
+                pad_mode='constant'
+            )
+            
+            # Compute magnitude spectrograms
+            x_mag = torch.abs(x_stft)
+            y_mag = torch.abs(y_stft)
+            
+            # Compute log magnitude spectrograms
+            x_log_mag = torch.log1p(x_mag)
+            y_log_mag = torch.log1p(y_mag)
+            
+            # Compute L1 loss between log magnitudes
+            channel_loss = torch.mean(torch.abs(x_log_mag - y_log_mag))
+            
+            # Weight stereo channels if configured
+            if c == 1:  # Right channel
+                channel_loss = channel_loss * self.config.stereo_weight
+                
+            total_loss = total_loss + channel_loss
+        
+        return total_loss / channels
+    
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Compute multiscale spectral loss between x and y"""
-        device = x.device
-        total_loss = torch.tensor(0.0, device=device)
+        """Compute multi-scale spectral loss"""
+        # Validate input shapes
+        if x.shape != y.shape:
+            raise ValueError(f"Shape mismatch: {x.shape} vs {y.shape}")
+        
+        # Initialize total loss
+        total_loss = torch.tensor(0.0, device=x.device)
         
         # Compute loss at each scale
         for block_width in self.config.block_widths:
             total_loss = total_loss + self._stft_loss(x, y, block_width)
-            
+        
         return total_loss / len(self.config.block_widths)
 
     # Alias call to forward for backward compatibility

@@ -63,54 +63,50 @@ from src.utils.device import device, get_device, init_training
 from src.modules.vaes.vae_edm2 import DualDiffusionVAE_EDM2
 from src.modules.formats.spectrogram import SpectrogramFormat
 from src.training.loss import MultiscaleSpectralLoss, MultiscaleSpectralLossConfig
+from src.modules.formats.simple_spectrogram import SimpleSpectrogramFormat, SimpleSpectrogramConfig
 
 @dataclass
 class VAETrainerConfig:
-    # EDM2-specific settings
-    target_snr: float = 20.0
-    res_balance: float = 0.4
-    attn_balance: float = 0.4
-    
-    # Loss weights
-    channel_kl_loss_weight: float = 0.05  # Reduced from 0.1
-    recon_loss_weight: float = 1.0  # Increased from 0.1
-    
-    # Spectral loss settings
-    block_widths: tuple[int, ...] = (16, 32, 64, 128)  # Larger windows
+    # From vae_train.json module_trainer_config
     block_overlap: int = 8
-    mel_bands: int = 80
-    min_frequency: int = 20
-    max_frequency: int = 20000
+    block_widths: tuple[int, ...] = (8, 16, 32, 64)
+    channel_kl_loss_weight: float = 1.0
+    imag_loss_weight: float = 1.0
+    point_loss_weight: float = 0
+    recon_loss_weight: float = 0.5
+    
+    # From format.json
     sample_rate: int = 32000
-    stereo_weight: float = 0.8  # Increased from 0.67
+    stereo_weight: float = 0.67  # Using stereo_coherence from format.json
+    
+    # From vae.json
+    target_snr: float = 31.984371183438952
+    res_balance: float = 0.3
+    attn_balance: float = 0.3
     
     # Training settings
     gradient_clip_val: float = 1.0
-    batch_size: int = 16  # Match training config
-    
-    def validate_batch_size(self, batch_size: int):
-        if batch_size != self.batch_size:
-            print(f"Warning: Batch size mismatch! Expected {self.batch_size}, got {batch_size}")
+    batch_size: int = 16
 
 class VAETrainer:
     def __init__(self, model: torch.nn.Module, 
                  config: VAETrainerConfig,
-                 format_processor: SpectrogramFormat,
+                 format_processor: SimpleSpectrogramFormat,
                  accelerator: Optional[Accelerator] = None) -> None:
-        """Initialize trainer with EDM2 features and simplified loss"""
+        """Initialize trainer with simplified spectrogram format"""
         super().__init__()
         self.model = model
         self.config = config
-        self.format_processor = format_processor
         self.accelerator = accelerator
         self.device = accelerator.device if accelerator else 'cpu'
         
-        # Initialize simplified spectral loss
+        # Store format processor and move to correct device
+        self.format_processor = format_processor.to(self.device)
+        
+        # Initialize spectral loss and move to correct device
         spectral_loss_config = MultiscaleSpectralLossConfig(
-            block_widths=list(config.block_widths),
+            block_widths=config.block_widths,
             block_overlap=config.block_overlap,
-            mel_bands=None,  # Simplified version doesn't use mel bands
-            freq_range=(config.min_frequency, config.max_frequency),
             sample_rate=config.sample_rate,
             stereo_weight=config.stereo_weight
         )
@@ -119,8 +115,13 @@ class VAETrainer:
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Training step with enhanced debugging"""
         try:
-            # Add batch validation
             spectrograms = batch['audio'].to(self.device)
+            
+            # Process spectrograms through format processor if needed
+            if spectrograms.dim() == 3:  # [batch, channels, samples]
+                spectrograms = self.format_processor.raw_to_sample(spectrograms)
+            
+            # Add batch validation
             batch_size = spectrograms.shape[0]
             
             print(f"\nBatch Processing:")
@@ -195,7 +196,7 @@ class VAETrainer:
             self.model.eval()
             print("\nGenerate samples:")
             
-            # 1. Input processing
+            # 1. Input processing - keep original shape [batch, channels, freq, time]
             spectrograms = batch['audio'].to(self.device)
             print(f"Input shape: {spectrograms.shape}")
             
@@ -210,16 +211,7 @@ class VAETrainer:
             print("\nFormat conversion:")
             print(f"Pre-conversion shape: {spectrograms.shape}")
             
-            # Ensure correct shape before conversion
-            if spectrograms.dim() == 4:  # [batch, channels, freq, time]
-                batch_size, channels, freq, time = spectrograms.shape
-                # Reshape if needed
-                spectrograms = spectrograms.reshape(batch_size * channels, freq, time)
-                recon = recon.reshape(batch_size * channels, freq, time)
-            
-            print(f"Conversion input shapes - Original: {spectrograms.shape}, Recon: {recon.shape}")
-            
-            # Convert to audio
+            # Convert to audio - keep batch and channel dimensions separate
             original_audio = self.format_processor.sample_to_raw(spectrograms)
             recon_audio = self.format_processor.sample_to_raw(recon)
             

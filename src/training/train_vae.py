@@ -18,7 +18,7 @@ import numpy as np
 from accelerate.utils import DistributedDataParallelKwargs
 
 from src.modules.vaes.vae_edm2 import DualDiffusionVAE_EDM2, DualDiffusionVAE_EDM2Config
-from src.modules.formats.spectrogram import SpectrogramFormat, SpectrogramFormatConfig
+from src.modules.formats.simple_spectrogram import SimpleSpectrogramFormat, SimpleSpectrogramConfig
 from src.training.module_trainers.vae_trainer import VAETrainer, VAETrainerConfig
 from src.dataset.audio_dataset import AudioDataset
 
@@ -38,11 +38,11 @@ class TrainingConfig:
     pad_to_length: int = 256
     
     # Optimized batch settings from your working config
-    batch_size: int = 128  # Larger batch size that worked
+    batch_size: int = 16  # Larger batch size that worked
     gradient_accumulation_steps: int = 4  # Keep your accumulation steps
     
     # Reduced overhead settings
-    eval_every: int = 500  # Less frequent audio logging
+    eval_every: int = 20  # Less frequent audio logging
     save_every: int = 1000  # Less frequent checkpoints
     
     # Data loading optimizations that worked for you
@@ -139,39 +139,50 @@ def main():
         lr=TrainingConfig.learning_rate
     )
     
-    # Initialize trainer with updated config
+    # Create trainer config from default configs
     trainer_config = VAETrainerConfig(
-        target_snr=20.0,
-        res_balance=0.4,
-        attn_balance=0.4,
+        # From vae_train.json module_trainer_config
         block_overlap=8,
         block_widths=(8, 16, 32, 64),
-        channel_kl_loss_weight=0.1,
-        recon_loss_weight=0.1,
-        mel_bands=80,
-        min_frequency=20,
-        max_frequency=20000,
+        channel_kl_loss_weight=0.001,
+        imag_loss_weight=1.0,
+        point_loss_weight=0,
+        recon_loss_weight=0.5,
+        
+        # From format.json
         sample_rate=32000,
         stereo_weight=0.67,
-        gradient_clip_val=1.0
+        
+        # From vae.json
+        target_snr=31.984371183438952,
+        res_balance=0.3,
+        attn_balance=0.3
     )
     
-    # Create spectrogram format config - Updated to match settings
-    spectrogram_config = SpectrogramFormatConfig(
+    # Create spectrogram config from format.json
+    spectrogram_config = SimpleSpectrogramConfig(
         sample_rate=32000,
-        step_size_ms=16,
+        sample_raw_channels=2,
+        num_frequencies=80,  # From format.json
+        step_size_ms=8,
         window_duration_ms=64,
-        padded_duration_ms=64,
-        num_frequencies=256,
+        window_exponent=32.0,
+        abs_exponent=0.25,
+        freq_scale_type="mel",
         min_frequency=20,
         max_frequency=20000,
-        freq_scale_type="mel"
+        num_fgla_iters=200,
+        fgla_momentum=0.99,
+        stereo_coherence=0.67
     )
+    
+    # Create format processor with new config
+    format_processor = SimpleSpectrogramFormat(spectrogram_config)
     
     trainer = VAETrainer(
         config=trainer_config,
         model=vae,
-        format_processor=SpectrogramFormat(spectrogram_config),
+        format_processor=format_processor,  # Pass our new format processor
         accelerator=accelerator
     )
     
