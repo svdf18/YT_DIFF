@@ -19,9 +19,9 @@ class DualDiffusionVAE_EDM2Config:
     in_channels: int = 2
     out_channels: int = 2
     latent_channels: int = 4
-    model_channels: int = 256  # Increased from 96
-    channel_mult: tuple[int, ...] = (1, 2, 4, 8)  # More aggressive scaling
-    num_layers_per_block: int = 4  # Increased from 3
+    model_channels: int = 128  # Reduced from 256
+    channel_mult: tuple[int, ...] = (1, 2, 4, 5)  # Changed from (1, 2, 4, 8)
+    num_layers_per_block: int = 4
     
     # New EDM2 features
     mlp_multiplier: int = 2  # Increased from 1

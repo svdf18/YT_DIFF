@@ -25,7 +25,7 @@ class SimpleSpectrogramConfig(DualDiffusionFormatConfig):
     window_periodic: bool = True
     
     # Spectrogram parameters (from format.json)
-    num_frequencies: int = 80  # Changed from 256 to match format.json
+    num_frequencies: int = 128  # Changed from 80 to match VAE architecture
     abs_exponent: float = 0.25
     t_scale: Optional[float] = None
     
@@ -109,8 +109,8 @@ class SimpleSpectrogramFormat(DualDiffusionFormat):
     
     def _create_mel_filterbank(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Create mel filterbank and its inverse"""
-        # Get frequencies in Hz
-        fft_freqs = torch.linspace(0, self.config.sample_rate // 2, 256)  # Match VAE output
+        # Get frequencies in Hz - match the VAE output dimension
+        fft_freqs = torch.linspace(0, self.config.sample_rate // 2, 256)  # Changed to 256
         
         # Convert to mel scale
         mel_min = hz_to_mel(torch.tensor(self.config.min_frequency))
@@ -119,7 +119,7 @@ class SimpleSpectrogramFormat(DualDiffusionFormat):
         hz_points = mel_to_hz(mel_points)
         
         # Create filterbank matrix [num_mel, n_freq]
-        fbank = torch.zeros((self.config.num_frequencies, 256))
+        fbank = torch.zeros((self.config.num_frequencies, 256))  # Changed to 256
         
         # Create triangular filters
         for i in range(self.config.num_frequencies):
@@ -139,7 +139,11 @@ class SimpleSpectrogramFormat(DualDiffusionFormat):
         fbank = fbank / (fbank.sum(dim=1, keepdim=True) + 1e-8)
         
         # Create pseudo-inverse for reconstruction
-        fbank_inverse = torch.pinverse(fbank)  # [n_freq, num_mel]
+        fbank_inverse = torch.pinverse(fbank)  # Will be [256, num_mel]
+        
+        print(f"DEBUG: Created mel filterbank with shapes:")
+        print(f"  - Forward: {fbank.shape}")
+        print(f"  - Inverse: {fbank_inverse.shape}")
         
         return fbank, fbank_inverse
     

@@ -5,20 +5,20 @@
   "latent_channels": 4,
   "label_dim": 1612,
   "dropout": 0,
-  "target_snr": 31.984371183438952,
-  "model_channels": 96,
+  "target_snr": 20.0,
+  "model_channels": 128,
   "channel_mult": [
     1,
     2,
-    3,
+    4,
     5
   ],
   "channel_mult_emb": null,
-  "channels_per_head": 64,
-  "num_layers_per_block": 3,
-  "res_balance": 0.3,
-  "attn_balance": 0.3,
-  "mlp_multiplier": 1,
+  "channels_per_head": 32,
+  "num_layers_per_block": 4,
+  "res_balance": 0.4,
+  "attn_balance": 0.4,
+  "mlp_multiplier": 2,
   "mlp_groups": 1,
-  "add_mid_block_attention": false
+  "add_mid_block_attention": true
 }

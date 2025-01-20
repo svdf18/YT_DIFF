@@ -119,16 +119,16 @@ def main():
     
     # Initialize VAE model with updated config
     vae_config = DualDiffusionVAE_EDM2Config(
-        in_channels=2,  # Stereo audio
+        in_channels=2,
         out_channels=2,
         latent_channels=4,
-        model_channels=256,
-        channel_mult=(1, 2, 4, 8),
+        model_channels=128,
+        channel_mult=(1, 2, 4, 5),
         num_layers_per_block=4,
         target_snr=20.0,
         res_balance=0.4,
         attn_balance=0.4,
-        dropout=0.0   # Start without dropout
+        dropout=0.0
     )
     
     vae = DualDiffusionVAE_EDM2(vae_config)
@@ -144,7 +144,7 @@ def main():
         # From vae_train.json module_trainer_config
         block_overlap=8,
         block_widths=(8, 16, 32, 64),
-        channel_kl_loss_weight=0.001,
+        channel_kl_loss_weight=0.1,
         imag_loss_weight=1.0,
         point_loss_weight=0,
         recon_loss_weight=0.5,
@@ -154,7 +154,7 @@ def main():
         stereo_weight=0.67,
         
         # From vae.json
-        target_snr=31.984371183438952,
+        target_snr=20,
         res_balance=0.3,
         attn_balance=0.3
     )
@@ -163,7 +163,7 @@ def main():
     spectrogram_config = SimpleSpectrogramConfig(
         sample_rate=32000,
         sample_raw_channels=2,
-        num_frequencies=80,  # From format.json
+        num_frequencies=128,  # Changed from 256
         step_size_ms=8,
         window_duration_ms=64,
         window_exponent=32.0,
